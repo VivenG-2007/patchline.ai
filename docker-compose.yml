@@ -54,8 +54,8 @@ services:
       retries: 5
 
   auth-service:
-    build: ./services/auth-service
-    env_file: ./services/auth-service/.env
+    build: ./services/auth_services
+    env_file: ./services/auth_services/.env
     environment:
       - MONGODB_URI=mongodb://mongodb:27017
       - REDIS_URL=redis://redis-shared:6379
@@ -67,8 +67,8 @@ services:
         condition: service_healthy
 
   main-service:
-    build: ./services/main
-    env_file: ./services/main/.env
+    build: ./services/main_services
+    env_file: ./services/main_services/.env
     environment:
       - REDIS_URL=redis://redis-main:6379
       # Read-mostly connection to the OTHER Redis instance, used only to
@@ -87,8 +87,8 @@ services:
 
   # Standalone BullMQ scan/fix worker(s) — same image as main-service, just a
   # different process (`node src/worker.js` instead of `node src/server.js`,
-  # see main-service/package.json's "worker" script). Runs ALONGSIDE
-  # main-service's own inline workers (main-service/src/server.js starts
+  # see main_services/package.json's "worker" script). Runs ALONGSIDE
+  # main-service's own inline workers (main_services/src/server.js starts
   # them unless DISABLE_INLINE_WORKERS=true) rather than replacing them —
   # BullMQ is built for multiple concurrent consumers on the same queue, so
   # this is real added capacity, not a toggle you have to flip first.
@@ -103,9 +103,9 @@ services:
   # service" for the equivalent Azure App Service setup and for guidance
   # on disabling main-service's inline workers once this is deployed.
   worker:
-    build: ./services/main
+    build: ./services/main_services
     command: ["node", "src/worker.js"]
-    env_file: ./services/main/.env
+    env_file: ./services/main_services/.env
     environment:
       - REDIS_URL=redis://redis-main:6379
       - SHARED_REDIS_URL=redis://redis-shared:6379
@@ -136,15 +136,8 @@ services:
       retries: 10
 
   ai-storage-service:
-    # NOTE: the actual directory is services/ai_sevices (not
-    # ai-storage-service) — this path was wrong before and would make
-    # `docker compose up` fail outright with "no such file or directory".
-    # Fixed as part of this pass; service NAME stays ai-storage-service
-    # since every other service's AI_STORAGE_SERVICE_URL already points at
-    # that hostname and changing it would be a much larger diff for no
-    # benefit.
-    build: ./services/ai_sevices  # Python / FastAPI — Dockerfile handles it, no compose changes needed
-    env_file: ./services/ai_sevices/.env
+    build: ./services/ai_services
+    env_file: ./services/ai_services/.env
     environment:
       - MONGODB_URI=mongodb://mongodb:27017
       - REDIS_URL=redis://redis-shared:6379

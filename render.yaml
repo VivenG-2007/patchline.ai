@@ -7,12 +7,12 @@
 #
 # Service map (matches docs/deployment.md's deploy order):
 #   1. patchline-redis          — managed Redis. Everything below depends on it.
-#   2. patchline-auth           — services/auth-service (Node, Docker)
-#   3. patchline-main           — services/main            (Node, Docker) — web/API
-#   4. patchline-main-worker    — services/main            (Node, Docker) — BullMQ
+#   2. patchline-auth           — services/auth_services (Node, Docker)
+#   3. patchline-main           — services/main_services (Node, Docker) — web/API
+#   4. patchline-main-worker    — services/main_services (Node, Docker) — BullMQ
 #      worker only (same image as #3, different start command) — see
-#      services/main/src/worker.js. Scale this independently of the API.
-#   5. patchline-ai             — services/ai_sevices       (Python, Docker)
+#      services/main_services/src/worker.js. Scale this independently of the API.
+#   5. patchline-ai             — services/ai_services   (Python, Docker)
 #
 # Vercel (frontend) is NOT part of this blueprint — Render doesn't host it.
 # Deploy the frontend separately per docs/deployment.md step 6, then come
@@ -22,8 +22,8 @@ databases: []
 
 services:
   # ── 1. Redis — shared by all three Node/Python services ──
-  # BullMQ (scan/fix queues), express-rate-limit's RedisStore (auth-service +
-  # main-service), and ai_sevices' own Redis-backed rate limiting/reconciliation
+  # BullMQ (scan/fix queues), express-rate-limit's RedisStore (auth_services +
+  # main_services), and ai_services' own Redis-backed rate limiting/reconciliation
   # sweep all point at this one instance. Nothing in the backend keeps
   # meaningful state in process memory — this is what makes every service
   # below horizontally scalable (see docs/deployment.md's "Statelessness" note).
@@ -36,8 +36,8 @@ services:
   - type: web
     name: patchline-auth
     runtime: docker
-    dockerfilePath: ./services/auth-service/Dockerfile
-    dockerContext: ./services/auth-service
+    dockerfilePath: ./services/auth_services/Dockerfile
+    dockerContext: ./services/auth_services
     plan: starter
     healthCheckPath: /health
     envVars:
@@ -93,8 +93,8 @@ services:
   - type: web
     name: patchline-main
     runtime: docker
-    dockerfilePath: ./services/main/Dockerfile
-    dockerContext: ./services/main
+    dockerfilePath: ./services/main_services/Dockerfile
+    dockerContext: ./services/main_services
     plan: starter
     healthCheckPath: /health
     envVars:
@@ -174,8 +174,8 @@ services:
   - type: worker
     name: patchline-main-worker
     runtime: docker
-    dockerfilePath: ./services/main/Dockerfile
-    dockerContext: ./services/main
+    dockerfilePath: ./services/main_services/Dockerfile
+    dockerContext: ./services/main_services
     dockerCommand: node src/worker.js
     plan: starter
     envVars:
@@ -198,12 +198,12 @@ services:
       # here via the dashboard, or promote shared ones into a Render env
       # group (Dashboard -> Env Groups) once you're past first deploy.
 
-  # ── 5. ai_sevices (Python/FastAPI: scanning, RAG, Risk Engine, fixes) ──
+  # ── 5. ai_services (Python/FastAPI: scanning, RAG, Risk Engine, fixes) ──
   - type: web
     name: patchline-ai
     runtime: docker
-    dockerfilePath: ./services/ai_sevices/Dockerfile
-    dockerContext: ./services/ai_sevices
+    dockerfilePath: ./services/ai_services/Dockerfile
+    dockerContext: ./services/ai_services
     plan: starter
     healthCheckPath: /health
     envVars:

@@ -16,13 +16,13 @@ Render Web App (frontend) ──► main-service (Render Web Service: Supabase +
 
 | Service | Tech Stack | Role | Render Deployment Type |
 |---|---|---|---|
-| [`frontend/`](file:///c:/Users/hp/Desktop/hackwave%201th/hackwave.ai/frontend) | Next.js 16, React 19, TypeScript, Tailwind v4 | Login/register UI, dashboard, vulnerability scanner console | **Render Web Service** (Node) |
-| [`services/auth_services/`](file:///c:/Users/hp/Desktop/hackwave%201th/hackwave.ai/services/auth_services) | Node.js / Express, MongoDB, Redis | User authentication, issues RS256 signed JWTs | **Render Web Service** (Node) |
-| [`services/main/`](file:///c:/Users/hp/Desktop/hackwave%201th/hackwave.ai/services/main) | Node.js / Express, Supabase, Redis | Core product API, gateway to AI service, GitHub/Jira OAuth integrations | **Render Web Service** (Node) |
-| [`services/ai-service/`](file:///c:/Users/hp/Desktop/hackwave%201th/hackwave.ai/services/ai-service) | Python / FastAPI, MongoDB, Redis, Azure Blob, Elasticsearch | SAST scanning engine (Semgrep + Tree-sitter + Regex), Model Router, RAG memory | **Render Web Service** (Python / Docker) |
+| [`frontend/`](file:///c:/Users/viven/Desktop/patchline/frontend) | Next.js 16, React 19, TypeScript, Tailwind v4 | Login/register UI, dashboard, vulnerability scanner console | **Render Web Service** (Node) / Vercel |
+| [`services/auth_services/`](file:///c:/Users/viven/Desktop/patchline/services/auth_services) | Node.js / Express, MongoDB, Redis | User authentication, issues RS256 signed JWTs | **Render Web Service** (Node) |
+| [`services/main_services/`](file:///c:/Users/viven/Desktop/patchline/services/main_services) | Node.js / Express, Supabase, Redis | Core product API, gateway to AI service, GitHub/Jira OAuth integrations | **Render Web Service** (Node) |
+| [`services/ai_services/`](file:///c:/Users/viven/Desktop/patchline/services/ai_services) | Python / FastAPI, MongoDB, Redis, Azure Blob, Elasticsearch | SAST scanning engine (Semgrep + Tree-sitter + Regex), Model Router, RAG memory | **Render Web Service** (Python / Docker) |
 
 > [!NOTE]
-> **Core Authentication Design:** `services/auth_services` signs JWT tokens using an RS256 private key (`JWT_PRIVATE_KEY_BASE64`). `services/main` and `services/ai-service` hold only the matching public key (`JWT_PUBLIC_KEY_BASE64`) and verify every incoming JWT locally — eliminating network latency back to `auth_services` on API calls.
+> **Core Authentication Design:** `services/auth_services` signs JWT tokens using an RS256 private key (`JWT_PRIVATE_KEY_BASE64`). `services/main_services` and `services/ai_services` hold only the matching public key (`JWT_PUBLIC_KEY_BASE64`) and verify every incoming JWT locally — eliminating network latency back to `auth_services` on API calls.
 
 ---
 
@@ -43,12 +43,12 @@ All AI calls route through `model_router.py` using **Featherless AI (Primary)** 
 ## 3. Repository Structure
 
 ```
-hackwave.ai/
-├── frontend/                  # Next.js 16 Web Application (Deploys on Render)
+patchline/
+├── frontend/                  # Next.js 16 Web Application
 ├── services/
 │   ├── auth_services/         # Authentication Service (Deploys on Render)
-│   ├── main/                  # Core API & Gateway Service (Deploys on Render)
-│   └── ai-service/            # SAST Scanner & AI Generation Engine (Deploys on Render)
+│   ├── main_services/         # Core API & Gateway Service (Deploys on Render)
+│   └── ai_services/           # SAST Scanner & AI Generation Engine (Deploys on Render)
 ├── docs/                      # Comprehensive technical documentation & AI specs
 ├── render.yaml                # Render Blueprint infrastructure specification
 └── README.md
