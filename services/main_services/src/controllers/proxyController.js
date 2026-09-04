@@ -58,6 +58,7 @@ const ZERO_DASHBOARD_STATS = {
     { axis: 'Dependencies', value: 0 },
   ],
   isElasticActive: false,
+  _serviceUnavailable: true,
 };
 
 async function proxyToAiStorage(req, res, next) {
@@ -119,7 +120,7 @@ async function proxyToAiStorage(req, res, next) {
 
     // If dashboard stats request failed, gracefully return zero telemetry so UI does not crash
     if (targetPath === '/api/v1/dashboard/stats') {
-      return res.status(200).json(ZERO_DASHBOARD_STATS);
+      return res.status(200).json({ ...ZERO_DASHBOARD_STATS, _serviceUnavailable: true });
     }
 
     if (resContentType.includes('application/json')) {
@@ -139,7 +140,7 @@ async function proxyToAiStorage(req, res, next) {
     logger.error({ err, targetUrl: env.aiStorageServiceUrl }, 'proxy to ai-storage-service failed');
     const targetPath = req.originalUrl.replace(/^\/api\/proxy/, '');
     if (targetPath === '/api/v1/dashboard/stats') {
-      return res.status(200).json(ZERO_DASHBOARD_STATS);
+      return res.status(200).json({ ...ZERO_DASHBOARD_STATS, _serviceUnavailable: true });
     }
     return res.status(502).json({ error: { message: 'AI/Storage service unavailable', code: 'UPSTREAM_UNAVAILABLE', requestId: req.id } });
   }

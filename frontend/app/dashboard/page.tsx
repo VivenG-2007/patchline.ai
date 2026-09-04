@@ -85,6 +85,7 @@ interface DashboardStats {
     provider?: string | null;
     count?: number;
   }[];
+  _serviceUnavailable?: boolean;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -235,6 +236,13 @@ export default function DashboardPage() {
 
       {error && (
         <ErrorBanner message={error} category="GATEWAY" onRetry={() => load()} className="mb-5" />
+      )}
+
+      {stats?._serviceUnavailable && !error && (
+        <div className="mb-5 px-4 py-3 rounded-lg border text-sm flex items-center gap-2" style={{ background: 'var(--warning-subtle, #fef9c3)', borderColor: 'var(--warning, #ca8a04)', color: 'var(--warning-foreground, #78350f)' }}>
+          <span>⚠️</span>
+          <span><strong>AI service unreachable</strong> — dashboard is showing empty state. Ensure <code>AI_STORAGE_SERVICE_URL</code> is set correctly in your Render environment for <code>patchline-ai-uv72</code>.</span>
+        </div>
       )}
 
       {loading ? (

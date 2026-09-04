@@ -4,6 +4,7 @@ const githubApp = require('../config/githubApp');
 const tokenStore = require('./githubTokenStore');
 const installationStore = require('./githubAppInstallationStore');
 const env = require('../config/env');
+const logger = require('../config/logger');
 
 async function getConnection(userId) {
   // 1. Try GitHub App installation token
