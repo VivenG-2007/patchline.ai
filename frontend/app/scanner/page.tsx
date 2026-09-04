@@ -220,9 +220,10 @@ function ScannerView() {
 
   // Clean up timer on unmount
   useEffect(() => {
+    const fixTimers = fixPollTimersRef.current;
     return () => {
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
-      Object.values(fixPollTimersRef.current).forEach((t) => clearTimeout(t));
+      Object.values(fixTimers).forEach((t) => clearTimeout(t));
     };
   }, []);
 

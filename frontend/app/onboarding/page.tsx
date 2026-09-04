@@ -196,7 +196,6 @@ function StepCard({
   title,
   description,
   connected,
-  connectHref,
   connectLabel,
   onSkip,
   onContinue,
