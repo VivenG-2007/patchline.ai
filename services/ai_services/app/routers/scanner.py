@@ -1970,3 +1970,38 @@ async def get_scan_history(limit: int = 20, user: CurrentUser = Depends(require_
     except Exception as exc:
         logger.error("scan_history_fetch_failed", error=str(exc))
         raise HTTPException(status_code=503, detail="Could not fetch scan history from database")
+
+
+class AttachJiraTicketPayload(BaseModel):
+    jiraTicket: dict
+
+
+@router.post("/scan/{scan_id}/jira-ticket")
+async def attach_scan_jira_ticket(
+    scan_id: str,
+    payload: AttachJiraTicketPayload,
+    user: CurrentUser = Depends(require_auth_optional),
+):
+    """Attach Jira ticket metadata to a scan document in MongoDB scan_history."""
+    db = get_db()
+    await db.scan_history.update_one(
+        {"scanId": scan_id},
+        {"$set": {"jiraTicket": payload.jiraTicket}}
+    )
+    return {"status": "ok", "scanId": scan_id}
+
+
+@router.post("/scan/{scan_id}/finding/{finding_id}/jira-ticket")
+async def attach_finding_jira_ticket(
+    scan_id: str,
+    finding_id: str,
+    payload: AttachJiraTicketPayload,
+    user: CurrentUser = Depends(require_auth_optional),
+):
+    """Attach Jira ticket metadata to a specific finding under fixes in MongoDB scan_history."""
+    db = get_db()
+    await db.scan_history.update_one(
+        {"scanId": scan_id},
+        {"$set": {f"fixes.{finding_id}.jiraTicket": payload.jiraTicket}}
+    )
+    return {"status": "ok", "scanId": scan_id, "findingId": finding_id}

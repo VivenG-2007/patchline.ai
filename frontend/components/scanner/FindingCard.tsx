@@ -56,6 +56,7 @@ export interface Finding {
   ruleKey?: string;
   evidence?: string[];
   cwe?: string;
+  jiraTicket?: { key: string; id?: string; url: string } | null;
 }
 
 
@@ -81,6 +82,7 @@ export interface FixStatus {
   summary?: string;
   details?: string;
   pullRequest?: { number: number; url: string };
+  jiraTicket?: { key: string; id?: string; url: string } | null;
   error?: string;
   attempts?: number;
   similarPastFixes?: SimilarPastFix[];
@@ -550,6 +552,21 @@ export default function FindingCard({
                   >
                     <GitPullRequest size={12} />
                     View PR #{fixStatus.pullRequest.number} on GitHub <ExternalLink size={10} />
+                  </a>
+                </div>
+              )}
+
+              {(fixStatus?.jiraTicket || finding.jiraTicket) && (
+                <div className="pt-1 flex items-center justify-between">
+                  <span className="text-[11px] text-text-muted">Jira issue:</span>
+                  <a
+                    href={(fixStatus?.jiraTicket || finding.jiraTicket)!.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-xs font-bold text-[#0052CC] dark:text-[#4c9aff] hover:underline"
+                  >
+                    <ExternalLink size={11} />
+                    Jira {(fixStatus?.jiraTicket || finding.jiraTicket)!.key}
                   </a>
                 </div>
               )}

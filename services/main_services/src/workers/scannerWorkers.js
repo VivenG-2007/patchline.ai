@@ -75,6 +75,18 @@ async function processScanJob(job) {
             (scanResults.aiAnalysisNote ? `\n\n${scanResults.aiAnalysisNote}` : ''),
           issueType: 'Bug',
         });
+        if (jiraTicket) {
+          try {
+            await fetchWithTimeout(`${env.aiStorageServiceUrl}/api/v1/scanner/scan/${scanId}/jira-ticket`, {
+              method: 'POST',
+              headers: upstreamHeaders({ userId, requestId }),
+              body: JSON.stringify({ jiraTicket }),
+              timeoutMs: env.timeouts.aiStorage,
+            });
+          } catch (syncErr) {
+            logger.warn({ syncErr, scanId }, 'Failed to sync Jira ticket to ai-storage service');
+          }
+        }
       }
     } catch (jiraErr) {
       logger.warn({ jiraErr, scanId }, 'Failed to create Jira ticket automatically');
@@ -190,10 +202,10 @@ async function processFixJob(job) {
       if (toStatus === 'FIX_UNRESOLVED') {
         // Best-effort: raise a ticket so "no valid fix found after N bounded
         // attempts" reaches a human somewhere other than a dashboard status
-        // badge — same pattern as the scan-completion ticket above, and
-        // same fix for the userId-as-object-property bug noted there.
+        // badge — same pattern as the scan-completion ticket above.
+        let jiraTicket = null;
         try {
-          await jiraService.createIssue({
+          jiraTicket = await jiraService.createIssue({
             userId,
             summary: `[DevSecOps AI] Manual review required — no valid fix found for ${findingId}`,
             description:
@@ -202,6 +214,19 @@ async function processFixJob(job) {
               `${fixResult.details || fixResult.summary || ''}`,
             issueType: 'Bug',
           });
+          if (jiraTicket) {
+            await scanStore.updateFix(scanId, findingId, { jiraTicket });
+            try {
+              await fetchWithTimeout(`${env.aiStorageServiceUrl}/api/v1/scanner/scan/${scanId}/finding/${findingId}/jira-ticket`, {
+                method: 'POST',
+                headers: upstreamHeaders({ userId, requestId }),
+                body: JSON.stringify({ jiraTicket }),
+                timeoutMs: env.timeouts.aiStorage,
+              });
+            } catch (syncErr) {
+              logger.warn({ syncErr, scanId, findingId }, 'Failed to sync finding Jira ticket to ai-storage service');
+            }
+          }
         } catch (jiraErr) {
           logger.warn({ jiraErr, scanId, findingId }, 'Failed to create Jira ticket for unresolved finding');
         }

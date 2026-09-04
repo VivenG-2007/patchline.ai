@@ -18,6 +18,7 @@ import {
   X,
   History,
   FolderGit2,
+  ExternalLink,
 } from 'lucide-react';
 import ProtectedShell from '@/components/ProtectedShell';
 import Card from '@/components/ui/Card';
@@ -75,6 +76,7 @@ type ScanResult = {
   scanTier?: string;
   aiAnalysisNote?: string;
   pullRequest?: { number: number; url: string };
+  jiraTicket?: { key: string; id?: string; url: string } | null;
   fixes?: Record<string, {
     status: string;
     attempts?: number;
@@ -754,6 +756,17 @@ function ScannerView() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
+              {scanResult.jiraTicket?.url && (
+                <a
+                  href={scanResult.jiraTicket.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-2.5 py-1.5 bg-[#0052CC]/10 border border-[#0052CC]/30 hover:border-[#0052CC] text-[#0052CC] dark:text-[#4c9aff] font-mono text-xs rounded-lg transition-colors inline-flex items-center gap-1.5 font-medium"
+                >
+                  <ExternalLink size={12} /> Jira {scanResult.jiraTicket.key}
+                </a>
+              )}
+
               <Button
                 type="button"
                 onClick={handleFixAllVulnerabilities}
