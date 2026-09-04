@@ -77,9 +77,9 @@ class Settings(BaseSettings):
     # If an LLM-assisted re-rank/tie-break is added later, this is where its
     # model config already lives.
     featherless_model_analysis: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
-    featherless_model_rag_ranking: str = "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct"
-    featherless_model_fix: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
-    featherless_model_verify: str = "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct"
+    featherless_model_rag_ranking: str = "deepseek-ai/DeepSeek-V4-Pro"
+    featherless_model_fix: str = "deepseek-ai/DeepSeek-V4-Flash"
+    featherless_model_verify: str = "deepseek-ai/DeepSeek-V4-Pro"
 
     # Fallback provider name (must be a key in ai_providers._PROVIDERS) +
     # per-task fallback models — used both when Featherless is disabled

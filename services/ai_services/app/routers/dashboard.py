@@ -459,7 +459,7 @@ async def get_dashboard_stats(user: CurrentUser = Depends(require_auth)) -> dict
         {
             "id": "fix_generation",
             "status": "running" if active_fixes > 0 else ("completed" if fixes_generated_total > 0 else "waiting"),
-            "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct" if featherless_calls > 0 else "gpt-5.2",
+            "model": "deepseek-ai/DeepSeek-V4-Flash" if featherless_calls > 0 else "gpt-5.2",
             "provider": "featherless" if featherless_calls > 0 else "azure_openai",
             "count": fixes_generated_total,
         },
