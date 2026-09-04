@@ -93,11 +93,19 @@ function JiraPageInner() {
           </Button>
         </Card>
       ) : (
-        <a href={jiraApi.connectUrl()} className="inline-block mb-8">
-          <Button className="gap-2">
+        <Button
+            className="gap-2 mb-8"
+            onClick={async () => {
+              try {
+                const res = await jiraApi.connect();
+                window.location.href = res.data.url;
+              } catch {
+                // error handled by 401 interceptor
+              }
+            }}
+          >
             <Workflow size={15} /> Connect Jira account
           </Button>
-        </a>
       )}
 
       {status?.connected && (

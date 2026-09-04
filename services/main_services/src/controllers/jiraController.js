@@ -34,6 +34,22 @@ async function oauthStart(req, res, next) {
   }
 }
 
+// GET /api/jira/oauth/start-url — same as oauthStart but returns JSON
+// { url } instead of doing a browser redirect. Lets the frontend call this
+// via axios (which sends the Authorization: Bearer header) and then navigate
+// window.location.href to the returned URL. Needed in cross-domain production
+// where a direct browser navigation to /oauth/start carries no cookie/header.
+async function oauthStartUrl(req, res, next) {
+  try {
+    assertConfigured(req);
+    const returnTo = sanitizeReturnTo(req.query.redirect, '/jira');
+    const state = await oauthState.createState('jira', req.user.id, returnTo);
+    return res.status(200).json({ url: jiraConfig.buildAuthorizationUrl(state) });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 // GET /api/jira/oauth/callback — Atlassian redirects the browser here after
 // consent. NOT behind requireAuth (Atlassian's redirect carries no app JWT)
 // — the `state` param is what proves which logged-in user initiated this.
@@ -142,6 +158,7 @@ async function getIssue(req, res, next) {
 
 module.exports = {
   oauthStart,
+  oauthStartUrl,
   oauthStartValidators,
   oauthCallback,
   status,

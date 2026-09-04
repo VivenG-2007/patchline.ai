@@ -26,6 +26,9 @@ router.post('/webhook', ctrl.handleWebhook);
 
 router.use(requireAuth, strictLimiter);
 router.get('/oauth/start', ctrl.oauthStartValidators, validate, ctrl.oauthStart);
+// JSON-returning variant — frontend calls this via axios (Bearer header),
+// then navigates window.location.href to the returned URL.
+router.get('/oauth/start-url', ctrl.oauthStartValidators, validate, ctrl.oauthStartUrl);
 router.get('/app/install', ctrl.installStart);
 router.get('/status', ctrl.status);
 router.delete('/disconnect', ctrl.disconnect);

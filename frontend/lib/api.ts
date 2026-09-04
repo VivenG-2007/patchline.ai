@@ -144,13 +144,12 @@ authApi.interceptors.response.use(
 
 export const jiraApi = {
   status: () => mainApi.get('/api/jira/status'),
-  // Full-page navigation, not an axios call — the user needs to actually see
-  // and approve Atlassian's consent screen, which an XHR redirect can't show.
-  // `returnTo` lets a caller (e.g. the onboarding wizard) get sent back to a
-  // specific in-app page instead of always landing on /jira.
-  connectUrl: (returnTo?: string) =>
-    `${process.env.NEXT_PUBLIC_MAIN_API_URL || 'http://localhost:5001'}/api/jira/oauth/start${returnTo ? `?redirect=${encodeURIComponent(returnTo)}` : ''
-    }`,
+  // Fetches the Atlassian OAuth consent URL via axios (which sends the
+  // Authorization: Bearer header) then the caller navigates to it.
+  // In cross-domain production a direct browser navigation to /oauth/start
+  // carries no cookie/header, so the backend gets NO_TOKEN.
+  connect: (returnTo?: string) =>
+    mainApi.get('/api/jira/oauth/start-url', { params: returnTo ? { redirect: returnTo } : {} }),
   disconnect: () => mainApi.delete('/api/jira/disconnect'),
   createIssue: (payload: { summary: string; description: string; issueType?: string }) =>
     mainApi.post('/api/jira/issues', payload),
@@ -159,9 +158,10 @@ export const jiraApi = {
 
 export const githubApi = {
   status: () => mainApi.get('/api/github/status'),
-  connectUrl: (returnTo?: string) =>
-    `${process.env.NEXT_PUBLIC_MAIN_API_URL || 'http://localhost:5001'}/api/github/oauth/start${returnTo ? `?redirect=${encodeURIComponent(returnTo)}` : ''
-    }`,
+  // Fetches the GitHub OAuth consent URL via axios (which sends the
+  // Authorization: Bearer header) then the caller navigates to it.
+  connect: (returnTo?: string) =>
+    mainApi.get('/api/github/oauth/start-url', { params: returnTo ? { redirect: returnTo } : {} }),
   disconnect: () => mainApi.delete('/api/github/disconnect'),
   listRepos: () => mainApi.get('/api/github/repos'),
   createIssue: (payload: { owner: string; repo: string; title: string; body?: string }) =>

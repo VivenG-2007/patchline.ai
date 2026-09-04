@@ -87,6 +87,22 @@ async function oauthStart(req, res, next) {
   }
 }
 
+// GET /api/github/oauth/start-url — same as oauthStart but returns JSON
+// { url } instead of doing a browser redirect. Lets the frontend call this
+// via axios (which sends the Authorization: Bearer header) and then navigate
+// window.location.href to the returned URL. Needed in cross-domain production
+// where a direct browser navigation to /oauth/start carries no cookie/header.
+async function oauthStartUrl(req, res, next) {
+  try {
+    assertConfigured();
+    const returnTo = sanitizeReturnTo(req.query.redirect, '/github');
+    const state = await oauthState.createState('github', req.user.id, returnTo);
+    return res.status(200).json({ url: githubConfig.buildAuthorizationUrl(state) });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 // GET /api/github/oauth/callback — public (no requireAuth): GitHub's
 // redirect carries no app JWT. The one-time `state` value is what
 // authenticates it instead.
@@ -475,6 +491,7 @@ async function handleInstallationEvent(req, res) {
 
 module.exports = {
   oauthStart,
+  oauthStartUrl,
   oauthStartValidators,
   oauthCallback,
   installStart,

@@ -140,7 +140,10 @@ function OnboardingInner() {
               title="Connect GitHub Organization"
               description="Patchline scans your repositories, checks AST syntax, and opens tested pull requests once fixes are approved."
               connected={githubConnected}
-              connectHref={githubApi.connectUrl('/onboarding?step=2')}
+              onConnect={async () => {
+                const res = await githubApi.connect('/onboarding?step=2');
+                window.location.href = res.data.url;
+              }}
               connectLabel="Connect GitHub Account"
               onSkip={() => goToStep(2)}
               onContinue={() => goToStep(2)}
@@ -154,7 +157,10 @@ function OnboardingInner() {
               title="Connect Atlassian Jira"
               description="Optional — Patchline automatically creates tracked Jira issue tickets for discovered high-severity vulnerabilities."
               connected={jiraConnected}
-              connectHref={jiraApi.connectUrl('/onboarding?step=3')}
+              onConnect={async () => {
+                const res = await jiraApi.connect('/onboarding?step=3');
+                window.location.href = res.data.url;
+              }}
               connectLabel="Connect Jira Cloud"
               onSkip={() => goToStep(3)}
               onContinue={() => goToStep(3)}
@@ -194,17 +200,23 @@ function StepCard({
   connectLabel,
   onSkip,
   onContinue,
+  onConnect,
 }: {
   icon: typeof GithubIcon;
   eyebrow: string;
   title: string;
   description: string;
   connected: boolean;
-  connectHref: string;
   connectLabel: string;
+  onConnect: () => Promise<void>;
   onSkip: () => void;
   onContinue: () => void;
 }) {
+  const [connecting, setConnecting] = useState(false);
+  const handleConnect = async () => {
+    setConnecting(true);
+    try { await onConnect(); } finally { setConnecting(false); }
+  };
   return (
     <div className="space-y-6">
       <div>
@@ -220,11 +232,13 @@ function StepCard({
           <Check size={14} strokeWidth={2.5} /> Integration Active
         </div>
       ) : (
-        <a href={connectHref} className="block">
-          <Button className="w-full py-2.5 text-xs font-mono gap-2">
-            <Icon size={16} /> {connectLabel}
-          </Button>
-        </a>
+        <Button
+          className="w-full py-2.5 text-xs font-mono gap-2"
+          disabled={connecting}
+          onClick={handleConnect}
+        >
+          <Icon size={16} /> {connecting ? 'Redirecting…' : connectLabel}
+        </Button>
       )}
 
       {connected ? (
