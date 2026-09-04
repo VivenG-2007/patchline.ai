@@ -1,5 +1,6 @@
 const { body, param } = require('express-validator');
 const githubService = require('../services/githubService');
+const jiraService = require('../services/jiraService');
 const scanStore = require('../services/scanStore');
 const scanTriggerService = require('../services/scanTriggerService');
 const { fixQueue } = require('../config/queue');
@@ -322,11 +323,92 @@ async function createPr(req, res, next) {
   }
 }
 
+async function raiseJiraTicket(req, res, next) {
+  try {
+    const { scanId } = req.params;
+    const scanRecord = await scanStore.getScan(scanId);
+
+    if (!scanRecord) {
+      return res.status(404).json({ error: { message: 'Scan record not found or expired', code: 'SCAN_NOT_FOUND', requestId: req.id } });
+    }
+    if (scanRecord.userId !== req.user.id) {
+      return res.status(403).json({ error: { message: 'This scan does not belong to your account', code: 'FORBIDDEN', requestId: req.id } });
+    }
+
+    if (scanRecord.jiraTicket && req.query.force !== 'true') {
+      return res.status(200).json({ scanId, jiraTicket: scanRecord.jiraTicket, alreadyExists: true });
+    }
+
+    const findingsCount = scanRecord.findingsCount ?? (scanRecord.findings || []).length;
+    const isClean = findingsCount === 0;
+    const repoOwner = scanRecord.repoOwner || 'Repository';
+    const repoName = scanRecord.repoName || '';
+    const branch = scanRecord.branch || 'main';
+    const containerUrl = scanRecord.containerUrl || 'N/A';
+    const blobUri = scanRecord.blobUri || 'N/A';
+
+    const summary = isClean
+      ? `[Patchline AI] Clean Security Scan: ${repoOwner}/${repoName}`
+      : `[Patchline AI] Security Vulnerabilities in ${repoOwner}/${repoName}`;
+
+    let description =
+      `Patchline AI Security Scan completed for ${repoOwner}/${repoName} (${branch}).\n\n` +
+      `Azure Container URL: ${containerUrl}\n` +
+      `Azure Blob URI: ${blobUri}\n` +
+      `Scan ID: ${scanId}\n` +
+      `Total Findings: ${findingsCount}\n`;
+
+    if (scanRecord.aiAnalysisNote) {
+      description += `\nAI Analysis Note:\n${scanRecord.aiAnalysisNote}\n`;
+    }
+
+    if (!isClean && scanRecord.findings && scanRecord.findings.length > 0) {
+      description += `\nTop Findings:\n`;
+      scanRecord.findings.slice(0, 10).forEach((f, idx) => {
+        description += `${idx + 1}. [${(f.severity || 'INFO').toUpperCase()}] ${f.title || f.category} in ${f.file}:${f.line || '?'}\n`;
+      });
+      if (scanRecord.findings.length > 10) {
+        description += `...and ${scanRecord.findings.length - 10} more finding(s).\n`;
+      }
+    }
+
+    const jiraTicket = await jiraService.createIssue({
+      userId: req.user.id,
+      summary,
+      description,
+      issueType: isClean ? 'Task' : 'Bug',
+    });
+
+    await scanStore.transitionScan(scanId, scanRecord.status, { jiraTicket });
+
+    try {
+      await fetchWithTimeout(`${env.aiStorageServiceUrl}/api/v1/scanner/scan/${scanId}/jira-ticket`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-internal-service-token': env.internalServiceToken,
+          'x-request-id': req.id,
+          ...(req.headers.authorization ? { authorization: req.headers.authorization } : { 'x-system-user-id': req.user.id }),
+        },
+        body: JSON.stringify({ jiraTicket }),
+        timeoutMs: env.timeouts.aiStorage,
+      });
+    } catch (syncErr) {
+      logger.warn({ syncErr: syncErr.message, scanId }, 'Manual Jira raise: failed to sync ticket to MongoDB');
+    }
+
+    return res.status(201).json({ scanId, jiraTicket });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   triggerScan,
   getScanStatus,
   approveAndFix,
   createPr,
+  raiseJiraTicket,
   getScanHistory,
   getAiProviderStatus,
   triggerScanValidators,

@@ -40,8 +40,66 @@ function apiBase(cloudId) {
   return `https://api.atlassian.com/ex/jira/${cloudId}`;
 }
 
+function formatAdfDescription(text) {
+  if (!text || typeof text !== 'string') {
+    return {
+      type: 'doc',
+      version: 1,
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: text ? String(text) : 'No description provided.' }],
+        },
+      ],
+    };
+  }
+
+  // Split into paragraphs on blank lines
+  const paragraphs = text.split(/\r?\n\r?\n+/);
+  const content = [];
+
+  for (const para of paragraphs) {
+    const lines = para.split(/\r?\n/);
+    const inlineContent = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (i > 0) {
+        inlineContent.push({ type: 'hardBreak' });
+      }
+      if (lines[i].length > 0) {
+        inlineContent.push({ type: 'text', text: lines[i] });
+      }
+    }
+    if (inlineContent.length > 0) {
+      content.push({
+        type: 'paragraph',
+        content: inlineContent,
+      });
+    }
+  }
+
+  if (content.length === 0) {
+    content.push({
+      type: 'paragraph',
+      content: [{ type: 'text', text: text.trim() || 'No description provided.' }],
+    });
+  }
+
+  return {
+    type: 'doc',
+    version: 1,
+    content,
+  };
+}
+
 async function createIssue({ userId, summary, description, issueType }) {
   const connection = await getValidConnection(userId);
+
+  const adfDescription = (description && typeof description === 'object' && description.type === 'doc')
+    ? description
+    : formatAdfDescription(description);
+
+  // Jira Cloud summary limit is 255 chars
+  const sanitizedSummary = (summary || 'Patchline AI Scan Report').slice(0, 250);
 
   const response = await fetchWithTimeout(`${apiBase(connection.cloudId)}/rest/api/3/issue`, {
     method: 'POST',
@@ -53,13 +111,9 @@ async function createIssue({ userId, summary, description, issueType }) {
     body: JSON.stringify({
       fields: {
         project: { key: env.jira.projectKey },
-        summary,
+        summary: sanitizedSummary,
         issuetype: { name: issueType || env.jira.issueType },
-        description: {
-          type: 'doc',
-          version: 1,
-          content: [{ type: 'paragraph', content: [{ type: 'text', text: description }] }],
-        },
+        description: adfDescription,
       },
     }),
     timeoutMs: env.timeouts.jira,
@@ -96,4 +150,4 @@ async function getIssue({ userId, issueKey }) {
   };
 }
 
-module.exports = { getValidConnection, createIssue, getIssue };
+module.exports = { getValidConnection, createIssue, getIssue, formatAdfDescription };

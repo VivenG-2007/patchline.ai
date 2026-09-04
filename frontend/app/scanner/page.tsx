@@ -19,6 +19,8 @@ import {
   History,
   FolderGit2,
   ExternalLink,
+  Database,
+  Ticket,
 } from 'lucide-react';
 import ProtectedShell from '@/components/ProtectedShell';
 import Card from '@/components/ui/Card';
@@ -70,6 +72,7 @@ type ScanResult = {
   findingsCount: number;
   findings: Finding[];
   blobUri?: string;
+  containerUrl?: string;
   fixBranch?: string;
   fixedAt?: string;
   ragMemoryEnabled?: boolean;
@@ -143,6 +146,7 @@ function ScannerView() {
   const [scanning, setScanning] = useState(false);
   const [activeStage, setActiveStage] = useState(0);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [raisingJira, setRaisingJira] = useState(false);
   const [fixStates, setFixStates] = useState<Record<string, FixStatus>>({});
   const [error, setError] = useState<string | null>(null);
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
@@ -323,6 +327,8 @@ function ScannerView() {
             findingsCount: data.findingsCount ?? (data.findings?.length || 0),
             findings: data.findings || [],
             blobUri: data.blobUri,
+            containerUrl: data.containerUrl,
+            jiraTicket: data.jiraTicket,
             fixes: data.fixes,
             ragMemoryEnabled: data.ragMemoryEnabled ?? true,
             scanTier: data.scanTier,
@@ -668,6 +674,32 @@ function ScannerView() {
     }
   };
 
+  const handleRaiseJiraTicket = async () => {
+    if (!scanResult?.scanId) return;
+    setRaisingJira(true);
+    try {
+      const { data } = await scannerApi.raiseJiraTicket(scanResult.scanId);
+      if (data?.jiraTicket) {
+        setScanResult((prev) => (prev ? { ...prev, jiraTicket: data.jiraTicket } : prev));
+        addToast({
+          type: 'success',
+          title: 'Jira Ticket Created',
+          message: `Created ticket ${data.jiraTicket.key} for scan report.`,
+        });
+      }
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Jira Ticket Failed',
+        message:
+          err?.response?.data?.error?.message ||
+          'Failed to create Jira ticket. Ensure Jira is connected in Integrations.',
+      });
+    } finally {
+      setRaisingJira(false);
+    }
+  };
+
   return (
     <ProtectedShell>
       {/* Page Header */}
@@ -833,14 +865,51 @@ function ScannerView() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-                {scanResult.jiraTicket?.url && (
+                {scanResult.jiraTicket?.url ? (
                   <a
                     href={scanResult.jiraTicket.url}
                     target="_blank"
                     rel="noreferrer"
                     className="px-3 py-2 bg-[#0052CC]/15 border border-[#0052CC]/40 hover:border-[#0052CC] text-[#0052CC] dark:text-[#4c9aff] font-mono text-xs rounded-xl transition-colors inline-flex items-center gap-1.5 font-semibold"
+                    title={`Open Jira Ticket ${scanResult.jiraTicket.key}`}
                   >
                     <ExternalLink size={13} /> Jira {scanResult.jiraTicket.key}
+                  </a>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleRaiseJiraTicket}
+                    disabled={raisingJira}
+                    className="gap-1.5 font-mono text-xs py-2 px-3 border-[#0052CC]/40 text-[#0052CC] dark:text-[#4c9aff] hover:bg-[#0052CC]/10"
+                    title="Raise a Jira ticket with the Azure container URL and scan report"
+                  >
+                    {raisingJira ? <Loader2 size={13} className="animate-spin" /> : <Ticket size={13} />}
+                    <span>{raisingJira ? 'Raising Ticket…' : 'Raise Jira Ticket'}</span>
+                  </Button>
+                )}
+
+                {scanResult.containerUrl && (
+                  <a
+                    href={scanResult.containerUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Azure Storage Container"
+                    className="px-3 py-2 bg-accent-cyan-soft/30 border border-accent-cyan/40 hover:border-accent-cyan text-accent-cyan font-mono text-xs rounded-xl transition-colors inline-flex items-center gap-1.5 font-medium"
+                  >
+                    <Database size={13} /> Azure Container
+                  </a>
+                )}
+
+                {scanResult.blobUri && (
+                  <a
+                    href={scanResult.blobUri}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Download raw report from Azure Blob"
+                    className="px-3 py-2 bg-bg-card border border-border-default hover:border-accent-cyan text-text-secondary hover:text-accent-cyan font-mono text-xs rounded-xl transition-colors inline-flex items-center gap-1.5 font-medium"
+                  >
+                    <ExternalLink size={13} /> Blob Report
                   </a>
                 )}
 
