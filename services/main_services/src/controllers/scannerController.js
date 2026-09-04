@@ -19,15 +19,24 @@ function callerAuthHeader(req) {
 
 async function triggerScan(req, res, next) {
   try {
-    const { repoOwner, repoName, branch = 'main' } = req.body;
-    const connection = await githubService.getConnection(req.user.id);
+    const { repoOwner, repoName, branch = 'main', githubToken } = req.body;
+    let token = githubToken;
+    if (!token) {
+      try {
+        const connection = await githubService.getConnection(req.user.id);
+        token = connection?.accessToken;
+      } catch (connErr) {
+        logger.warn({ connErr: connErr.message, userId: req.user.id }, 'Could not get GitHub connection for triggerScan');
+        throw connErr;
+      }
+    }
 
     const { scanId } = await scanTriggerService.enqueueScan({
       userId: req.user.id,
       repoOwner,
       repoName,
       branch,
-      githubToken: connection.accessToken,
+      githubToken: token,
       authHeader: callerAuthHeader(req),
       requestId: req.id,
       trigger: 'manual',
@@ -96,7 +105,15 @@ async function approveAndFix(req, res, next) {
       return res.status(404).json({ error: { message: `Finding '${findingId}' not found on this scan`, code: 'FINDING_NOT_FOUND', requestId: req.id } });
     }
 
-    const connection = await githubService.getConnection(req.user.id);
+    let token = req.body.githubToken || scanRecord.githubToken;
+    if (!token) {
+      try {
+        const connection = await githubService.getConnection(req.user.id);
+        token = connection?.accessToken;
+      } catch (connErr) {
+        logger.warn({ connErr: connErr.message, userId: req.user.id }, 'Could not resolve GitHub connection in approveAndFix');
+      }
+    }
 
     // This is THE human-approval gate the product spec calls out as "the
     // most important safety boundary": it's the only place a finding can
@@ -118,7 +135,7 @@ async function approveAndFix(req, res, next) {
         repoOwner: scanRecord.repoOwner,
         repoName: scanRecord.repoName,
         branch: scanRecord.branch,
-        githubToken: connection.accessToken,
+        githubToken: token,
         authHeader: callerAuthHeader(req),
         requestId: req.id,
       },
@@ -208,14 +225,105 @@ const scanStatusValidators = [
   param('scanId').trim().notEmpty().withMessage('scanId is required'),
 ];
 
+const createPrValidators = [
+  param('scanId').trim().notEmpty().withMessage('scanId is required'),
+  param('findingId').trim().notEmpty().withMessage('findingId is required'),
+];
+
+// Manual PR creation: for a finding that is FIX_VERIFIED with a fixBranch but
+// no pullRequest yet (e.g. automatic PR creation failed transiently). The
+// frontend can surface a "Create Pull Request" button for this case.
+async function createPr(req, res, next) {
+  try {
+    const { scanId, findingId } = req.params;
+    const scanRecord = await scanStore.getScan(scanId);
+
+    if (!scanRecord) {
+      return res.status(404).json({ error: { message: 'Scan record not found or expired', code: 'SCAN_NOT_FOUND', requestId: req.id } });
+    }
+    if (scanRecord.userId !== req.user.id) {
+      return res.status(403).json({ error: { message: 'This scan does not belong to your account', code: 'FORBIDDEN', requestId: req.id } });
+    }
+
+    const fixRecord = scanRecord.fixes?.[findingId];
+    if (!fixRecord) {
+      return res.status(404).json({ error: { message: `Finding '${findingId}' has no fix record`, code: 'FIX_NOT_FOUND', requestId: req.id } });
+    }
+    if (fixRecord.status !== 'FIX_VERIFIED') {
+      return res.status(409).json({ error: { message: `Cannot create PR: fix status is '${fixRecord.status}' (expected FIX_VERIFIED)`, code: 'INVALID_FIX_STATUS', requestId: req.id } });
+    }
+    if (!fixRecord.fixBranch) {
+      return res.status(409).json({ error: { message: 'No fix branch recorded for this finding', code: 'NO_FIX_BRANCH', requestId: req.id } });
+    }
+    if (fixRecord.pullRequest) {
+      // PR already exists — return it so the frontend can link it without a new API call
+      return res.status(200).json({ scanId, findingId, pullRequest: fixRecord.pullRequest, alreadyExists: true });
+    }
+
+    let token = req.body.githubToken || scanRecord.githubToken;
+    if (!token) {
+      try {
+        token = await githubService.getRepoToken(scanRecord.repoOwner, scanRecord.repoName, req.user.id);
+      } catch (tokenErr) {
+        logger.warn({ tokenErr: tokenErr.message, scanId, findingId }, 'Could not resolve GitHub token for manual PR creation');
+      }
+    }
+    if (!token) {
+      try {
+        const conn = await githubService.getConnection(req.user.id);
+        token = conn?.accessToken;
+      } catch (connErr) {
+        logger.warn({ connErr: connErr.message }, 'getConnection failed in createPr');
+      }
+    }
+
+    const pr = await githubService.createPullRequest(req.user.id, {
+      owner: scanRecord.repoOwner,
+      repo: scanRecord.repoName,
+      title: `[AI Security Fix] ${fixRecord.summary || 'Remediate vulnerability'}`,
+      body: `### DevSecOps AI Vulnerability Fix\n\n- **Scan ID**: \`${scanId}\`\n- **Finding**: \`${findingId}\`\n- **Fix Verified**: Yes\n\n${fixRecord.details || ''}`,
+      head: fixRecord.fixBranch,
+      base: scanRecord.branch || 'main',
+      githubToken: token,
+    });
+
+    logger.info({ prNumber: pr.number, prUrl: pr.url, scanId, findingId }, 'Manual PR creation succeeded');
+
+    // Persist to Redis
+    await scanStore.updateFix(scanId, findingId, { pullRequest: pr });
+
+    // Persist to MongoDB (best-effort)
+    try {
+      await fetchWithTimeout(`${env.aiStorageServiceUrl}/api/v1/scanner/scan/${scanId}/finding/${findingId}/pull-request`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-internal-service-token': env.internalServiceToken,
+          'x-request-id': req.id,
+          ...(req.headers.authorization ? { authorization: req.headers.authorization } : { 'x-system-user-id': req.user.id }),
+        },
+        body: JSON.stringify({ pullRequest: pr }),
+        timeoutMs: env.timeouts.aiStorage,
+      });
+    } catch (syncErr) {
+      logger.warn({ syncErr: syncErr.message, scanId, findingId }, 'Manual PR: failed to sync to MongoDB — Redis has it');
+    }
+
+    return res.status(201).json({ scanId, findingId, pullRequest: pr });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   triggerScan,
   getScanStatus,
   approveAndFix,
+  createPr,
   getScanHistory,
   getAiProviderStatus,
   triggerScanValidators,
   approveFixValidators,
   scanStatusValidators,
+  createPrValidators,
 };
-

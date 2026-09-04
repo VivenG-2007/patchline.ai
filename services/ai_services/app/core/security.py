@@ -84,10 +84,20 @@ async def require_auth_optional(
 ) -> CurrentUser:
     token = _extract_token(authorization, access_token)
     if token:
-        payload = _verify(token)
-        user = CurrentUser(user_id=payload["sub"], role=payload.get("role"))
-        request.state.user_id = user.id
-        return user
+        try:
+            payload = _verify(token)
+            user = CurrentUser(user_id=payload["sub"], role=payload.get("role"))
+            request.state.user_id = user.id
+            return user
+        except HTTPException:
+            settings = get_settings()
+            if not (
+                x_system_user_id
+                and settings.internal_service_token
+                and x_internal_service_token
+                and hmac.compare_digest(x_internal_service_token, settings.internal_service_token)
+            ):
+                raise
 
     settings = get_settings()
     if (

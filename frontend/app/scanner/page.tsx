@@ -136,7 +136,7 @@ export default function ScannerPage() {
 }
 
 function ScannerView() {
-  const [repoInput, setRepoInput] = useState('octocat/secure-api');
+  const [repoInput, setRepoInput] = useState('');
   const [branchInput, setBranchInput] = useState('main');
   const [repoError, setRepoError] = useState<string | null>(null);
 
@@ -153,7 +153,7 @@ function ScannerView() {
     verifierModel?: string;
   } | null>(null);
 
-  const [userRepos, setUserRepos] = useState<RepoItem[]>(DEFAULT_DEMO_REPOS);
+  const [userRepos, setUserRepos] = useState<RepoItem[]>([]);
   const [githubConnected, setGithubConnected] = useState<boolean | null>(null);
   const { addToast } = useToast();
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -240,9 +240,11 @@ function ScannerView() {
               ? raw.repos
               : [];
           setUserRepos(list);
-          if (list.length > 0 && repoInput === 'octocat/secure-api') {
-            setRepoInput(list[0].fullName);
-            if (list[0].defaultBranch) setBranchInput(list[0].defaultBranch);
+          if (list.length > 0) {
+            setRepoInput((prev) => (!prev || prev === 'octocat/secure-api' ? list[0].fullName : prev));
+            if (list[0].defaultBranch) {
+              setBranchInput((prev) => (prev === 'main' ? list[0].defaultBranch! : prev));
+            }
           }
         }
       })
@@ -709,9 +711,29 @@ function ScannerView() {
             <div className="flex-1 min-w-[280px] space-y-1.5">
               <label className="text-xs font-mono uppercase tracking-wider text-text-muted flex items-center justify-between">
                 <span>Target Repository</span>
-                <span className="text-[11px] text-accent-cyan">
-                  {userRepos.length} available
-                </span>
+                {userRepos.length > 0 ? (
+                  <span className="text-[11px] text-accent-cyan">
+                    {userRepos.length} connected
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-text-muted font-mono flex items-center gap-1.5">
+                    <Link href="/github" className="text-accent-cyan hover:underline">
+                      Connect GitHub
+                    </Link>
+                    <span>·</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUserRepos(DEFAULT_DEMO_REPOS);
+                        setRepoInput(DEFAULT_DEMO_REPOS[0].fullName);
+                        setBranchInput(DEFAULT_DEMO_REPOS[0].defaultBranch || 'main');
+                      }}
+                      className="text-accent-cyan hover:underline"
+                    >
+                      Use Demo Repo
+                    </button>
+                  </span>
+                )}
               </label>
               <RepoSelectDropdown
                 repos={userRepos}
@@ -784,42 +806,88 @@ function ScannerView() {
       )}
 
       {/* 3. Findings & Remediation Grid */}
-      {scanResult && (
+      {scanResult && (() => {
+        const verifiedCount = scanResult.findings.filter((f) => fixStates[f.id]?.phase === 'VERIFIED').length;
+        const processingCount = scanResult.findings.filter((f) => fixStates[f.id]?.phase === 'PROCESSING').length;
+        const pendingCount = scanResult.findings.length - verifiedCount - processingCount;
+
+        return (
         <div className="space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl border border-border-default bg-bg-card">
-            <div>
-              <h2 className="font-display text-lg font-bold text-text-primary flex items-center gap-2">
-                <span>Identified Flaws ({scanResult.findings.length})</span>
-              </h2>
-              <p className="text-xs text-text-muted mt-0.5">
-                Each flaw is isolated and ready for human-authorized AI patch synthesis & verification.
-              </p>
+          {/* Remediation Action Banner */}
+          <div className="rounded-2xl border border-accent-cyan/30 bg-gradient-to-r from-accent-cyan/10 via-bg-card to-accent-purple/10 p-5 shadow-lg space-y-4 animate-fade-rise-in">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="space-y-1.5">
+                <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-accent-cyan-soft/60 border border-accent-cyan/30 text-accent-cyan font-mono text-[11px] font-semibold uppercase tracking-wider">
+                  <ShieldCheck size={13} />
+                  Autonomous Remediation Gate Armed
+                </div>
+                <h3 className="font-display text-lg font-bold text-text-primary">
+                  {verifiedCount === scanResult.findings.length
+                    ? 'All Vulnerabilities Verified & Remediated'
+                    : `${scanResult.findings.length} Vulnerabilities Detected · Awaiting Human Authorization`}
+                </h3>
+                <p className="text-xs text-text-secondary max-w-3xl leading-relaxed">
+                  Security policy requires developer authorization before AI commits code changes.
+                  Authorize patches to generate syntax-accurate fixes on isolated branches, run dual adversarial verification, and submit GitHub Pull Requests.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                {scanResult.jiraTicket?.url && (
+                  <a
+                    href={scanResult.jiraTicket.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-2 bg-[#0052CC]/15 border border-[#0052CC]/40 hover:border-[#0052CC] text-[#0052CC] dark:text-[#4c9aff] font-mono text-xs rounded-xl transition-colors inline-flex items-center gap-1.5 font-semibold"
+                  >
+                    <ExternalLink size={13} /> Jira {scanResult.jiraTicket.key}
+                  </a>
+                )}
+
+                <Button
+                  type="button"
+                  onClick={handleFixAllVulnerabilities}
+                  disabled={pendingCount === 0 && processingCount > 0}
+                  className={`gap-2 font-mono text-xs py-2.5 px-5 shadow-lg flex items-center transition-all ${
+                    pendingCount > 0
+                      ? 'bg-gradient-to-r from-accent-cyan via-accent-purple to-accent-emerald text-white hover:opacity-95 pulse-ring-active'
+                      : ''
+                  }`}
+                >
+                  <Sparkles size={14} />
+                  <span>
+                    {processingCount > 0 && pendingCount === 0
+                      ? `Synthesizing ${processingCount} Patches…`
+                      : `Fix All Vulnerabilities (${pendingCount > 0 ? pendingCount : scanResult.findings.length})`}
+                  </span>
+                </Button>
+              </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              {scanResult.jiraTicket?.url && (
-                <a
-                  href={scanResult.jiraTicket.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-2.5 py-1.5 bg-[#0052CC]/10 border border-[#0052CC]/30 hover:border-[#0052CC] text-[#0052CC] dark:text-[#4c9aff] font-mono text-xs rounded-lg transition-colors inline-flex items-center gap-1.5 font-medium"
-                >
-                  <ExternalLink size={12} /> Jira {scanResult.jiraTicket.key}
-                </a>
-              )}
-
-              <Button
-                type="button"
-                onClick={handleFixAllVulnerabilities}
-                className="gap-2 text-xs font-mono py-2 px-4 shadow-lg flex items-center"
-              >
-                <Sparkles size={14} />
-                <span>Fix All Vulnerabilities ({scanResult.findings.length})</span>
-              </Button>
-
-              <span className="font-mono text-xs text-text-muted hidden sm:inline">
-                Scan ID: <strong className="text-text-primary">{scanResult.scanId}</strong>
-              </span>
+            {/* Live Status Flow Pills */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2 border-t border-border-default/50 font-mono text-xs">
+              <div className="p-2.5 rounded-xl bg-bg-card/70 border border-border-default flex items-center justify-between">
+                <span className="text-text-muted text-[11px]">Total Flaws</span>
+                <span className="font-bold text-text-primary">{scanResult.findings.length}</span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-bg-card/70 border border-border-default flex items-center justify-between">
+                <span className="text-text-muted text-[11px]">Awaiting Approval</span>
+                <span className={`font-bold ${pendingCount > 0 ? 'text-accent-amber' : 'text-text-muted'}`}>{pendingCount}</span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-bg-card/70 border border-border-default flex items-center justify-between">
+                <span className="text-text-muted text-[11px]">In Synthesis</span>
+                <span className={`font-bold ${processingCount > 0 ? 'text-accent-cyan flex items-center gap-1' : 'text-text-muted'}`}>
+                  {processingCount > 0 && <Loader2 size={12} className="animate-spin" />}
+                  {processingCount}
+                </span>
+              </div>
+              <div className="p-2.5 rounded-xl bg-bg-card/70 border border-border-default flex items-center justify-between">
+                <span className="text-text-muted text-[11px]">Verified &amp; PRs</span>
+                <span className={`font-bold ${verifiedCount > 0 ? 'text-accent-emerald flex items-center gap-1' : 'text-text-muted'}`}>
+                  {verifiedCount > 0 && <CheckCircle2 size={12} />}
+                  {verifiedCount}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -832,11 +900,22 @@ function ScannerView() {
                 ragMemoryEnabled={scanResult.ragMemoryEnabled ?? true}
                 onApproveAndFix={handleApproveAndFix}
                 onViewDeepTimeline={(finding) => setSelectedFinding(finding)}
+                scanId={scanResult.scanId}
+                onPrCreated={(findingId, pr) => {
+                  setFixStates((prev) => ({
+                    ...prev,
+                    [findingId]: {
+                      ...prev[findingId],
+                      pullRequest: pr,
+                    },
+                  }));
+                }}
               />
             ))}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* 4. Deep Vulnerability Inspection & 5-Stage Timeline Modal */}
       {selectedFinding && (

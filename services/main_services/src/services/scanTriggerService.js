@@ -32,6 +32,7 @@ async function enqueueScan({
     repoName,
     repo: `${repoOwner}/${repoName}`,
     branch,
+    githubToken: githubToken || undefined,
     status: 'QUEUED',
     trigger,
     changedFiles: changedFiles || null,

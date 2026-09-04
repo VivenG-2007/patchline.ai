@@ -204,6 +204,8 @@ export const scannerApi = {
     mainApi.get(`/api/scanner/status/${scanId}`),
   approveAndFix: (payload: { scanId: string; findingId: string }) =>
     mainApi.post('/api/scanner/approve-fix', payload),
+  createPr: (scanId: string, findingId: string) =>
+    mainApi.post(`/api/scanner/scan/${scanId}/finding/${findingId}/create-pr`, {}),
   history: (limit = 20) =>
     mainApi.get(`/api/scanner/history?limit=${limit}`),
   // Live AI provider health — Featherless primary / Azure OpenAI fallback
@@ -213,6 +215,7 @@ export const scannerApi = {
   dashboardStats: () =>
     mainApi.get('/api/proxy/api/v1/dashboard/stats'),
 };
+
 
 
 // Used right after login/register to decide whether to route the person

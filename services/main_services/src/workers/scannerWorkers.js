@@ -241,6 +241,23 @@ async function processFixJob(job) {
       return;
     }
 
+    // Resolve a fresh token if the one from the job is stale/missing —
+    // GitHub App installation tokens expire after 1 hour; a long-queued job
+    // may have waited past that, or the token was never stored in job data
+    // (webhook-triggered scans). getRepoToken() checks the user's stored
+    // connection first, then falls back to the App installation for the repo.
+    let effectiveToken = githubToken;
+    if (!effectiveToken) {
+      try {
+        effectiveToken = await githubService.getRepoToken(repoOwner, repoName, userId);
+        if (effectiveToken) {
+          logger.info({ scanId, findingId }, 'Resolved fresh GitHub token for PR creation via getRepoToken()');
+        }
+      } catch (tokenErr) {
+        logger.warn({ tokenErr: tokenErr.message, scanId, findingId }, 'Could not resolve fresh GitHub token — PR creation may fail');
+      }
+    }
+
     let pr = null;
     try {
       pr = await githubService.createPullRequest(userId, {
@@ -250,10 +267,11 @@ async function processFixJob(job) {
         body: `### DevSecOps AI Vulnerability Fix\n\n- **Scan ID**: \`${scanId}\`\n- **Finding**: \`${findingId}\`\n- **Fix Verified**: Yes\n\n${fixResult.details || ''}`,
         head: fixResult.fixBranch,
         base: branch,
+        githubToken: effectiveToken,
       });
       logger.info({ prNumber: pr?.number, prUrl: pr?.url, scanId, findingId }, 'GitHub pull request successfully opened for verified fix');
     } catch (prErr) {
-      logger.error({ prErr, scanId, findingId }, 'Failed to create GitHub PR');
+      logger.error({ prErr: prErr.message, prErrStatus: prErr.status, prErrDetails: prErr.details, scanId, findingId }, 'Failed to create GitHub PR');
     }
 
     await scanStore.transitionFix(scanId, findingId, 'FIX_VERIFIED', {
@@ -275,7 +293,24 @@ async function processFixJob(job) {
       completedAt: new Date().toISOString(),
     });
 
-    logger.info({ scanId, findingId, jobId: job.id }, 'fix job completed and verified');
+    // Sync the PR to MongoDB so scan history and dashboard metrics retain
+    // the PR link across page reloads. Best-effort — a transient failure
+    // here must not cause BullMQ to retry an already-verified fix.
+    if (pr) {
+      try {
+        await fetchWithTimeout(`${env.aiStorageServiceUrl}/api/v1/scanner/scan/${scanId}/finding/${findingId}/pull-request`, {
+          method: 'POST',
+          headers: upstreamHeaders({ userId, requestId }),
+          body: JSON.stringify({ pullRequest: pr }),
+          timeoutMs: env.timeouts.aiStorage,
+        });
+        logger.info({ prNumber: pr.number, scanId, findingId }, 'PR synced to MongoDB');
+      } catch (syncErr) {
+        logger.warn({ syncErr: syncErr.message, scanId, findingId }, 'Failed to sync PR to MongoDB — PR link visible in Redis only until TTL');
+      }
+    }
+
+    logger.info({ scanId, findingId, jobId: job.id, prCreated: !!pr }, 'fix job completed and verified');
 
   } catch (err) {
     logger.error({ err, scanId, findingId, jobId: job.id, attempt: job.attemptsMade + 1 }, 'fix job failed');

@@ -113,23 +113,139 @@ async function createIssue(userId, { owner, repo, title, body }) {
   return { number: data.number, url: data.html_url, title: data.title };
 }
 
-async function createPullRequest(userId, { owner, repo, title, body, head, base = 'main' }) {
-  const connection = await getConnection(userId);
-  const response = await fetchWithTimeout(`${githubConfig.API_BASE}/repos/${owner}/${repo}/pulls`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${connection.accessToken}`,
-      accept: 'application/vnd.github+json',
-      'content-type': 'application/json',
-      'user-agent': 'patchline',
-    },
-    body: JSON.stringify({ title, body, head, base }),
-    timeoutMs: env.timeouts.github,
-  });
-  const data = await response.json();
+async function getRepoToken(owner, repo, userId) {
+  // 1. Try resolving via user's connection
+  if (userId) {
+    try {
+      const conn = await getConnection(userId);
+      if (conn?.accessToken) return conn.accessToken;
+    } catch {}
+  }
+
+  // 2. Query GitHub App installation for this specific repository
+  if (githubApp.isConfigured() && owner && repo) {
+    try {
+      const repoInstall = await githubApp.getRepoInstallation(owner, repo);
+      if (repoInstall?.id) {
+        const { token } = await githubApp.getInstallationToken(repoInstall.id);
+        if (userId) {
+          installationStore.upsertInstallation({
+            installationId: repoInstall.id,
+            accountLogin: repoInstall.account?.login || owner,
+            connectedByUserId: userId,
+            repositorySelection: repoInstall.repository_selection || 'selected',
+          }).catch(() => {});
+        }
+        return token;
+      }
+    } catch (appErr) {
+      logger.warn({ appErr: appErr.message, owner, repo }, 'Could not resolve repo installation token');
+    }
+  }
+
+  // 3. Fall back to any user installation
+  if (userId) {
+    try {
+      const userInstalls = await installationStore.listInstallationsForUser(userId);
+      if (userInstalls.length > 0) {
+        const { token } = await githubApp.getInstallationToken(userInstalls[0].installationId);
+        return token;
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+async function createPullRequest(userId, { owner, repo, title, body, head, base = 'main', githubToken, accessToken }) {
+  let token = accessToken || githubToken;
+  if (!token) {
+    token = await getRepoToken(owner, repo, userId);
+  }
+  if (!token) {
+    const connection = await getConnection(userId);
+    token = connection.accessToken;
+  }
+
+  const authHeader = token.startsWith('Bearer ') || token.startsWith('token ') ? token : (token.startsWith('ghp_') ? `token ${token}` : `Bearer ${token}`);
+
+  const postPR = async (baseBranch, headBranch) => {
+    return fetchWithTimeout(`${githubConfig.API_BASE}/repos/${owner}/${repo}/pulls`, {
+      method: 'POST',
+      headers: {
+        authorization: authHeader,
+        accept: 'application/vnd.github+json',
+        'content-type': 'application/json',
+        'user-agent': 'patchline',
+      },
+      body: JSON.stringify({ title, body, head: headBranch, base: baseBranch }),
+      timeoutMs: env.timeouts.github,
+    });
+  };
+
+  let targetBase = base || 'main';
+  let response = await postPR(targetBase, head);
+  let data = await response.json().catch(() => ({}));
+
+  // If GitHub says no commits between base and head, wait 1.5s for git ref replication and retry once
+  if (!response.ok && response.status === 422 && String(data?.message || '').toLowerCase().includes('no commits between')) {
+    logger.info({ owner, repo, head }, 'Waiting 1.5s for GitHub git ref replication before retrying PR creation');
+    await new Promise((r) => setTimeout(r, 1500));
+    response = await postPR(targetBase, head);
+    data = await response.json().catch(() => ({}));
+  }
+
+  // If base branch failed (e.g. 422 invalid base 'main'), resolve default_branch and retry
+  if (!response.ok && response.status === 422) {
+    try {
+      const repoResp = await fetchWithTimeout(`${githubConfig.API_BASE}/repos/${owner}/${repo}`, {
+        headers: { authorization: authHeader, accept: 'application/vnd.github+json', 'user-agent': 'patchline' },
+        timeoutMs: env.timeouts.github,
+      });
+      if (repoResp.ok) {
+        const repoData = await repoResp.json();
+        const defaultBranch = repoData.default_branch;
+        if (defaultBranch && defaultBranch !== targetBase) {
+          logger.info({ owner, repo, defaultBranch }, 'Retrying pull request creation with repo default_branch');
+          targetBase = defaultBranch;
+          response = await postPR(targetBase, head);
+          data = await response.json().catch(() => ({}));
+        }
+      }
+    } catch (retryErr) {
+      logger.warn({ retryErr }, 'Failed retrying PR creation with default branch');
+    }
+  }
+
+  // If head ref is not found, try qualifying with owner:head
+  if (!response.ok && response.status === 422 && !head.includes(':')) {
+    response = await postPR(targetBase, `${owner}:${head}`);
+    data = await response.json().catch(() => ({}));
+  }
+
+  // If a pull request already exists for this head branch, retrieve and return it
+  if (!response.ok && response.status === 422 && String(data?.message || '').toLowerCase().includes('already exists')) {
+    try {
+      const listResp = await fetchWithTimeout(`${githubConfig.API_BASE}/repos/${owner}/${repo}/pulls?head=${owner}:${head}&state=all`, {
+        headers: { authorization: authHeader, accept: 'application/vnd.github+json', 'user-agent': 'patchline' },
+        timeoutMs: env.timeouts.github,
+      });
+      if (listResp.ok) {
+        const list = await listResp.json();
+        if (Array.isArray(list) && list.length > 0) {
+          logger.info({ owner, repo, head, prNumber: list[0].number }, 'Found existing PR for head branch');
+          return { number: list[0].number, url: list[0].html_url, title: list[0].title };
+        }
+      }
+    } catch (findErr) {
+      logger.warn({ findErr }, 'Failed retrieving existing PR after 422');
+    }
+  }
+
   if (!response.ok) {
     const err = new Error(data?.message || 'GitHub rejected the Pull Request creation request');
     err.status = response.status === 404 ? 404 : 502;
+    err.details = data;
     throw err;
   }
   return { number: data.number, url: data.html_url, title: data.title };
@@ -222,6 +338,7 @@ async function deleteWebhook(userId, { owner, repo, hookId }) {
 
 module.exports = {
   getConnection,
+  getRepoToken,
   listRepos,
   getRepo,
   createIssue,

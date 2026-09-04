@@ -227,9 +227,9 @@ export default function ScanPipeline({
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-accent-cyan px-2 py-0.5 rounded bg-accent-cyan-soft border border-accent-cyan/30">
+            <span className="inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider text-accent-cyan px-2 py-0.5 rounded bg-accent-cyan-soft border border-accent-cyan/30 shadow-sm">
               <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan pulse-dot" />
-              8-Stage Remediation Engine
+              6-Stage Security Engine
             </span>
             <span className="font-mono text-xs text-text-muted">
               {repo} ({branch})

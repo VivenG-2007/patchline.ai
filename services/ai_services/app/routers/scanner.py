@@ -278,12 +278,40 @@ _FETCH_CONCURRENCY = 8
 
 
 async def _fetch_github_file_tree(owner: str, repo: str, branch: str, token: Optional[str]) -> list[dict]:
-    """Return a flat list of {path, url} for all blobs in the repo tree."""
-    headers = {"Accept": "application/vnd.github+json"}
+    """Return a flat list of {path, url} for all blobs in the repo tree with branch & commit SHA fallbacks."""
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "patchline-scanner"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    client = github_http.get_client()
+
     url = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
-    resp = await github_http.get_client().get(url, headers=headers, timeout=20)
+    resp = await client.get(url, headers=headers, timeout=20)
+
+    # If 404, resolve the branch's commit SHA or fallback to repo default branch
+    if resp.status_code != 200:
+        logger.info("github_tree_fetch_retrying_via_commit", owner=owner, repo=repo, branch=branch, status=resp.status_code)
+        try:
+            commit_resp = await client.get(f"https://api.github.com/repos/{owner}/{repo}/commits/{branch}", headers=headers, timeout=15)
+            if commit_resp.status_code == 200:
+                commit_data = commit_resp.json()
+                tree_sha = commit_data.get("commit", {}).get("tree", {}).get("sha") or commit_data.get("sha")
+                if tree_sha:
+                    resp = await client.get(f"https://api.github.com/repos/{owner}/{repo}/git/trees/{tree_sha}?recursive=1", headers=headers, timeout=20)
+        except Exception as exc:
+            logger.warning("github_commit_sha_lookup_failed", error=str(exc))
+
+        # If still not 200, check repository default branch
+        if resp.status_code != 200:
+            try:
+                repo_resp = await client.get(f"https://api.github.com/repos/{owner}/{repo}", headers=headers, timeout=15)
+                if repo_resp.status_code == 200:
+                    default_branch = repo_resp.json().get("default_branch")
+                    if default_branch and default_branch != branch:
+                        logger.info("github_tree_fallback_to_default_branch", repo=f"{owner}/{repo}", default_branch=default_branch)
+                        resp = await client.get(f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1", headers=headers, timeout=20)
+            except Exception as exc:
+                logger.warning("github_repo_default_branch_lookup_failed", error=str(exc))
+
     if resp.status_code != 200:
         logger.warning("github_tree_fetch_failed", status=resp.status_code, detail=resp.text[:200])
         return []
@@ -291,12 +319,18 @@ async def _fetch_github_file_tree(owner: str, repo: str, branch: str, token: Opt
     return [item for item in data.get("tree", []) if item.get("type") == "blob"]
 
 
-async def _fetch_file_content(raw_url: str, token: Optional[str]) -> str:
-    """Download a single file's raw content from GitHub."""
-    headers = {}
+async def _fetch_file_content(raw_url: str, token: Optional[str], owner: Optional[str] = None, repo: Optional[str] = None, path: Optional[str] = None, branch: Optional[str] = None) -> str:
+    """Download a single file's raw content from GitHub with fallback to contents API."""
+    headers = {"User-Agent": "patchline-scanner"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    resp = await github_http.get_client().get(raw_url, headers=headers, timeout=15)
+    client = github_http.get_client()
+    resp = await client.get(raw_url, headers=headers, timeout=15)
+    if resp.status_code != 200 and owner and repo and path:
+        # Fallback to GitHub REST API contents endpoint
+        contents_headers = {**headers, "Accept": "application/vnd.github.raw"}
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}" + (f"?ref={branch}" if branch else "")
+        resp = await client.get(api_url, headers=contents_headers, timeout=15)
     if resp.status_code != 200:
         return ""
     text = resp.text
@@ -329,7 +363,7 @@ async def _collect_repo_files(owner: str, repo: str, branch: str, token: Optiona
     async def fetch_one(item: dict) -> Optional[dict]:
         async with sem:
             raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{item['path']}"
-            content = await _fetch_file_content(raw_url, token)
+            content = await _fetch_file_content(raw_url, token, owner=owner, repo=repo, path=item["path"], branch=branch)
             return {"path": item["path"], "content": content} if content else None
 
     results = await asyncio.gather(*(fetch_one(item) for item in scannable))
@@ -354,7 +388,7 @@ async def _fetch_specific_files(owner: str, repo: str, branch: str, paths: list[
     async def fetch_one(path: str) -> Optional[dict]:
         async with sem:
             raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
-            content = await _fetch_file_content(raw_url, token)
+            content = await _fetch_file_content(raw_url, token, owner=owner, repo=repo, path=path, branch=branch)
             return {"path": path, "content": content} if content else None
 
     results = await asyncio.gather(*(fetch_one(p) for p in scannable_paths))
@@ -371,11 +405,28 @@ def _gh_headers(token: Optional[str]) -> dict:
 
 
 async def _get_branch_head_sha(owner: str, repo: str, branch: str, token: Optional[str]) -> str:
+    client = github_http.get_client()
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/git/ref/heads/{branch}"
-    resp = await github_http.get_client().get(url, headers=_gh_headers(token), timeout=15)
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Could not resolve base branch '{branch}': {resp.text[:200]}")
-    return resp.json()["object"]["sha"]
+    resp = await client.get(url, headers=_gh_headers(token), timeout=15)
+    if resp.status_code == 200:
+        return resp.json()["object"]["sha"]
+
+    # Fallback 1: Resolve commit SHA directly via commits/{branch}
+    commit_url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{branch}"
+    commit_resp = await client.get(commit_url, headers=_gh_headers(token), timeout=15)
+    if commit_resp.status_code == 200:
+        return commit_resp.json()["sha"]
+
+    # Fallback 2: Check repo default branch if requested branch differs
+    repo_url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}"
+    repo_resp = await client.get(repo_url, headers=_gh_headers(token), timeout=15)
+    if repo_resp.status_code == 200:
+        default_branch = repo_resp.json().get("default_branch")
+        if default_branch and default_branch != branch:
+            logger.info("get_branch_head_fallback_to_default_branch", repo=f"{owner}/{repo}", default_branch=default_branch)
+            return await _get_branch_head_sha(owner, repo, default_branch, token)
+
+    raise HTTPException(status_code=502, detail=f"Could not resolve base branch '{branch}': {resp.text[:200]}")
 
 
 async def _create_branch(owner: str, repo: str, new_branch: str, from_sha: str, token: Optional[str]) -> None:
@@ -2004,4 +2055,36 @@ async def attach_finding_jira_ticket(
         {"scanId": scan_id},
         {"$set": {f"fixes.{finding_id}.jiraTicket": payload.jiraTicket}}
     )
-    return {"status": "ok", "scanId": scan_id, "findingId": finding_id}
+    return {"status": "ok", "scanId": scan_id, "findingId": finding_id}
+
+
+class AttachPullRequestPayload(BaseModel):
+    pullRequest: dict  # {number: int, url: str, title?: str}
+
+
+@router.post("/scan/{scan_id}/finding/{finding_id}/pull-request")
+async def attach_finding_pull_request(
+    scan_id: str,
+    finding_id: str,
+    payload: AttachPullRequestPayload,
+    user: CurrentUser = Depends(require_auth_optional),
+):
+    """Persist a GitHub Pull Request link to a specific finding's fix record in MongoDB.
+
+    Called by main-service's fix worker after createPullRequest() succeeds, so the
+    PR link survives past Redis TTL and appears in scan history / dashboard queries.
+    """
+    db = get_db()
+    await db.scan_history.update_one(
+        {"scanId": scan_id},
+        {"$set": {f"fixes.{finding_id}.pullRequest": payload.pullRequest}}
+    )
+    logger.info(
+        "pull_request_synced_to_mongo",
+        scan_id=scan_id,
+        finding_id=finding_id,
+        pr_number=payload.pullRequest.get("number"),
+        pr_url=payload.pullRequest.get("url"),
+    )
+    return {"status": "ok", "scanId": scan_id, "findingId": finding_id, "pullRequest": payload.pullRequest}
+

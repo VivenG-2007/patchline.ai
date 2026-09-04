@@ -119,10 +119,31 @@ async function invalidateInstallationToken(installationId) {
   }
 }
 
+async function getRepoInstallation(owner, repo) {
+  if (!isConfigured() || !owner || !repo) return null;
+  try {
+    const appJwt = signAppJwt();
+    const response = await fetchWithTimeout(`${API_BASE}/repos/${owner}/${repo}/installation`, {
+      headers: {
+        authorization: `Bearer ${appJwt}`,
+        accept: 'application/vnd.github+json',
+        'user-agent': 'patchline',
+      },
+      timeoutMs: env.timeouts.github,
+    });
+    if (!response.ok) return null;
+    return response.json();
+  } catch (err) {
+    logger.warn({ err: err.message, owner, repo }, 'Failed getting repository installation from GitHub App API');
+    return null;
+  }
+}
+
 module.exports = {
   isConfigured,
   signAppJwt,
   listAppInstallations,
+  getRepoInstallation,
   getInstallationToken,
   invalidateInstallationToken,
   API_BASE,

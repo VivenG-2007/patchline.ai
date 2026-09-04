@@ -115,7 +115,6 @@ const JSON_LD = {
 export default function LandingPage() {
   return (
     <main className="min-h-screen bg-bg-base transition-colors duration-300">
-      {/* eslint-disable-next-line react/no-danger */}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }} />
       <TopNav />
 

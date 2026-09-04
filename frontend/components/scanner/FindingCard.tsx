@@ -28,6 +28,7 @@ import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import RagMemoryTrace, { SimilarPastFix } from '@/components/RagMemoryTrace';
 import { useToast } from '@/components/ToastNotification';
+import { scannerApi } from '@/lib/api';
 
 // Real, backend-confirmed fix-pipeline checkpoints (ai-storage-service's
 // app/services/scan_progress.py FIX_STAGES) → short human label. Keep in
@@ -126,6 +127,8 @@ interface FindingCardProps {
   ragMemoryEnabled?: boolean;
   onApproveAndFix: (findingId: string) => Promise<void> | void;
   onViewDeepTimeline?: (finding: Finding) => void;
+  scanId?: string;
+  onPrCreated?: (findingId: string, pr: { number: number; url: string }) => void;
 }
 
 const SEVERITY_TONE: Record<Finding['severity'], 'critical' | 'warning' | 'info' | 'neutral'> = {
@@ -141,12 +144,42 @@ export default function FindingCard({
   ragMemoryEnabled = true,
   onApproveAndFix,
   onViewDeepTimeline,
+  scanId,
+  onPrCreated,
 }: FindingCardProps) {
   const [diffExpanded, setDiffExpanded] = useState(false);
   const [ragExpanded, setRagExpanded] = useState(true);
   const [approving, setApproving] = useState(false);
+  const [creatingPr, setCreatingPr] = useState(false);
   const [copiedPatch, setCopiedPatch] = useState(false);
   const { addToast } = useToast();
+
+  const handleCreatePr = async () => {
+    if (!scanId || !finding.id || creatingPr) return;
+    setCreatingPr(true);
+    try {
+      const res = await scannerApi.createPr(scanId, finding.id);
+      const pr = res.data?.pullRequest;
+      if (pr) {
+        addToast({
+          type: 'success',
+          title: 'Pull Request Created',
+          message: `PR #${pr.number} opened successfully on GitHub.`,
+        });
+        if (onPrCreated) {
+          onPrCreated(finding.id, pr);
+        }
+      }
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'PR Creation Failed',
+        message: err?.response?.data?.error?.message || err?.message || 'Failed to create PR on GitHub.',
+      });
+    } finally {
+      setCreatingPr(false);
+    }
+  };
 
   const attempts = fixStatus?.attempts || 0;
   const maxAttemptsReached = attempts >= 3;
@@ -285,7 +318,7 @@ export default function FindingCard({
                   ? `Fix Verified · ↓${Math.round(fixStatus.riskEvaluation.reductionPct)}% Risk`
                   : 'Fix Verified'}
               </div>
-              {fixStatus?.pullRequest && (
+              {fixStatus?.pullRequest ? (
                 <a
                   href={fixStatus.pullRequest.url}
                   target="_blank"
@@ -295,7 +328,18 @@ export default function FindingCard({
                   <GitPullRequest size={13} />
                   PR #{fixStatus.pullRequest.number} <ExternalLink size={11} />
                 </a>
-              )}
+              ) : scanId && (fixStatus?.fixBranch || finding.suggestedFix) ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleCreatePr}
+                  disabled={creatingPr}
+                  className="text-xs inline-flex items-center gap-1.5 h-7 px-2.5"
+                >
+                  {creatingPr ? <Loader2 size={12} className="animate-spin" /> : <GitPullRequest size={12} />}
+                  {creatingPr ? 'Opening PR…' : 'Create PR'}
+                </Button>
+              ) : null}
             </div>
           ) : isNeedsReview ? (
             <div className="flex flex-col sm:items-end gap-1.5">
@@ -398,6 +442,54 @@ export default function FindingCard({
       {/* ────────────────── Active Fix Details: Synthesis & Verification ────────────────── */}
       {(isFixing || isSettled || fixStatus?.summary || fixStatus?.fixBranch) && (
         <div className="pt-3 border-t border-border-default space-y-3">
+          {/* 4-Step Remediation Flow Stepper */}
+          <div className="rounded-xl border border-border-default bg-bg-card/70 p-3">
+            <div className="flex items-center justify-between text-[11px] font-mono text-text-muted mb-2 pb-1.5 border-b border-border-default/50">
+              <span className="flex items-center gap-1.5 font-semibold text-text-primary">
+                <span className="w-2 h-2 rounded-full bg-accent-cyan pulse-dot" />
+                PatchLine Autonomous Remediation Track
+              </span>
+              <span className="text-[10px] text-accent-cyan">
+                {isVerified ? 'Completed · PR Active' : isFixing ? 'Synthesis & Verification in Flight' : isNeedsReview ? 'Human Review Needed' : isUnresolved ? 'Attempts Exhausted' : 'Awaiting Authorization'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[
+                { step: 1, label: 'Branch & RAG', key: 'BRANCH', active: isFixing && (!fixStatus?.stage || fixStatus?.stage === 'FIX_GENERATING'), done: isVerified || (isFixing && fixStatus?.stage && fixStatus?.stage !== 'FIX_GENERATING') },
+                { step: 2, label: 'AI Patch Synthesis', key: 'SYNTHESIS', active: isFixing && fixStatus?.stage === 'FIX_GENERATING', done: isVerified || (isFixing && (fixStatus?.stage === 'CODEX_VERIFYING' || fixStatus?.stage === 'DETERMINISTIC_VERIFYING' || fixStatus?.stage === 'RISK_RECALCULATING')) },
+                { step: 3, label: 'Dual Verification', key: 'VERIFY', active: isFixing && (fixStatus?.stage === 'CODEX_VERIFYING' || fixStatus?.stage === 'DETERMINISTIC_VERIFYING'), done: isVerified || (isFixing && fixStatus?.stage === 'RISK_RECALCULATING'), failed: isNeedsReview || isFailed },
+                { step: 4, label: 'GitHub PR & Sync', key: 'DEPLOY', active: isFixing && fixStatus?.stage === 'RISK_RECALCULATING', done: isVerified },
+              ].map((st) => (
+                <div
+                  key={st.step}
+                  className={`flex items-center gap-2 p-2 rounded-lg border text-xs font-mono transition-all ${
+                    st.done
+                      ? 'border-accent-emerald/30 bg-accent-emerald-soft/10 text-accent-emerald'
+                      : st.failed
+                        ? 'border-accent-amber/30 bg-accent-amber-soft/10 text-accent-amber'
+                        : st.active
+                          ? 'border-accent-cyan bg-accent-cyan-soft/20 text-accent-cyan shadow-sm'
+                          : 'border-border-default/40 bg-bg-subtle/30 text-text-muted opacity-60'
+                  }`}
+                >
+                  <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                    st.done
+                      ? 'bg-accent-emerald text-white'
+                      : st.failed
+                        ? 'bg-accent-amber text-black'
+                        : st.active
+                          ? 'bg-accent-cyan text-white pulse-ring-active'
+                          : 'bg-bg-subtle border border-border-default text-text-muted'
+                  }`}>
+                    {st.done ? <Check size={11} strokeWidth={3} /> : st.active ? <Loader2 size={11} className="animate-spin" /> : st.step}
+                  </div>
+                  <span className="truncate text-[11px] font-medium">{st.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* Fix Synthesis Card — model attribution is dynamic (fixModelLabel),
               never a hardcoded model name, since model_router.py can route
               different attempts to different providers. */}
@@ -541,7 +633,7 @@ export default function FindingCard({
                 </div>
               )}
 
-              {fixStatus?.pullRequest && (
+              {fixStatus?.pullRequest ? (
                 <div className="pt-1 flex items-center justify-between">
                   <span className="text-[11px] text-text-muted">Target branch updated:</span>
                   <a
@@ -554,7 +646,22 @@ export default function FindingCard({
                     View PR #{fixStatus.pullRequest.number} on GitHub <ExternalLink size={10} />
                   </a>
                 </div>
-              )}
+              ) : isVerified && scanId && (fixStatus?.fixBranch || finding.suggestedFix) ? (
+                <div className="pt-1 flex items-center justify-between">
+                  <span className="text-[11px] text-text-muted">
+                    {fixStatus?.fixBranch ? `Branch: ${fixStatus.fixBranch}` : 'Patch verified, PR pending'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCreatePr}
+                    disabled={creatingPr}
+                    className="inline-flex items-center gap-1 text-xs font-bold text-accent-cyan hover:underline disabled:opacity-50"
+                  >
+                    {creatingPr ? <Loader2 size={11} className="animate-spin" /> : <GitPullRequest size={11} />}
+                    {creatingPr ? 'Opening…' : 'Create PR on GitHub'}
+                  </button>
+                </div>
+              ) : null}
 
               {(fixStatus?.jiraTicket || finding.jiraTicket) && (
                 <div className="pt-1 flex items-center justify-between">

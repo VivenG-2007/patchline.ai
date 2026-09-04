@@ -32,6 +32,10 @@ const oauthStartValidators = [query('redirect').optional().isString().isLength({
 // ── GitHub App install flow (opt-in / default, GITHUB_AUTH_MODE=github_app) ──
 
 // GET /api/github/app/install — full-page redirect to the App's public install page.
+const redis = require('../config/redis');
+const { fetchWithTimeout } = require('../utils/httpClient');
+
+// GET /api/github/app/install — full-page redirect to the App's public install page.
 async function installStart(req, res, next) {
   try {
     if (!env.githubApp.slug) {
@@ -41,6 +45,21 @@ async function installStart(req, res, next) {
     }
     const returnTo = sanitizeReturnTo(req.query.redirect, '/github');
     const state = await oauthState.createState('github_app_install', req.user.id, returnTo);
+
+    res.cookie('gh_install_user', req.user.id, {
+      httpOnly: true,
+      secure: env.nodeEnv === 'production',
+      sameSite: 'lax',
+      maxAge: 15 * 60 * 1000,
+    });
+    res.cookie('gh_install_return', returnTo, {
+      httpOnly: true,
+      secure: env.nodeEnv === 'production',
+      sameSite: 'lax',
+      maxAge: 15 * 60 * 1000,
+    });
+    await redis.set(`github_app_pending:${req.user.id}`, state, 'EX', 900);
+
     return res.redirect(`https://github.com/apps/${env.githubApp.slug}/installations/new?state=${encodeURIComponent(state)}`);
   } catch (err) {
     return next(err);
@@ -52,8 +71,9 @@ async function installStart(req, res, next) {
 async function installCallback(req, res, next) {
   try {
     const { state, setup_action: setupAction, installation_id: installationId } = req.query;
-    let returnTo = '/github';
-    let userId = null;
+    let returnTo = req.cookies?.gh_install_return ? sanitizeReturnTo(req.cookies.gh_install_return, '/github') : '/github';
+    let userId = req.cookies?.gh_install_user || null;
+
     if (state) {
       const consumed = await oauthState.consumeState('github_app_install', state);
       if (consumed) {
@@ -61,12 +81,42 @@ async function installCallback(req, res, next) {
         userId = consumed.userId;
       }
     }
+
     if (installationId && userId) {
+      let accountLogin = '';
+      let accountType = 'User';
+      let repoSelection = 'all';
+      try {
+        if (githubApp.isConfigured()) {
+          const appJwt = githubApp.signAppJwt();
+          const infoResp = await fetchWithTimeout(`https://api.github.com/app/installations/${installationId}`, {
+            headers: { authorization: `Bearer ${appJwt}`, accept: 'application/vnd.github+json', 'user-agent': 'patchline' },
+            timeoutMs: env.timeouts.github,
+          });
+          if (infoResp.ok) {
+            const info = await infoResp.json();
+            accountLogin = info.account?.login || '';
+            accountType = info.account?.type || 'User';
+            repoSelection = info.repository_selection || 'all';
+          }
+        }
+      } catch (infoErr) {
+        logger.warn({ infoErr: infoErr.message }, 'Failed fetching installation info from GitHub API');
+      }
+
       await installationStore.upsertInstallation({
         installationId: Number(installationId),
+        accountLogin,
+        accountType,
         connectedByUserId: userId,
+        repositorySelection: repoSelection,
       });
+      logger.info({ installationId, userId, accountLogin }, 'GitHub App installation linked to user');
     }
+
+    res.clearCookie('gh_install_user');
+    res.clearCookie('gh_install_return');
+
     const separator = returnTo.includes('?') ? '&' : '?';
     return res.redirect(`${env.frontendUrl}${returnTo}${separator}connected=true&provider=github&github_app_setup=${encodeURIComponent(setupAction || 'unknown')}`);
   } catch (err) {
