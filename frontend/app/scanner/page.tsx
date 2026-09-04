@@ -191,7 +191,7 @@ function ScannerView() {
               phase: fix.status === 'FIX_VERIFIED' ? 'VERIFIED'
                    : fix.status === 'FIX_NEEDS_REVIEW' ? 'NEEDS_REVIEW'
                    : fix.status === 'FIX_UNRESOLVED' ? 'UNRESOLVED'
-                   : fix.status === 'FIX_FAILED' || fix.status === 'FAILED' || (fix.error && fix.status !== 'FIX_PROCESSING' && fix.status !== 'FIX_QUEUED') ? 'FAILED'
+                   : fix.status === 'FIX_FAILED' ? 'FAILED'
                    : fix.status === 'FIX_PROCESSING' || fix.status === 'FIX_QUEUED' ? 'PROCESSING'
                    : null,
               fixBranch: fix.fixBranch,
@@ -519,27 +519,21 @@ function ScannerView() {
             // (previously this fell through to the 'PROCESSING' default
             // below and would poll/spin forever, since the backend will
             // never move it any further).
-            const isTerminalFix =
+            if (
               fixData &&
               (fixData.status === 'FIX_VERIFIED' ||
                 fixData.status === 'FIX_NEEDS_REVIEW' ||
                 fixData.status === 'FIX_FAILED' ||
-                fixData.status === 'FIX_UNRESOLVED' ||
-                fixData.status === 'FAILED' ||
-                Boolean(fixData.error && fixData.status !== 'FIX_PROCESSING' && fixData.status !== 'FIX_QUEUED'));
-
-            if (isTerminalFix) {
+                fixData.status === 'FIX_UNRESOLVED')
+            ) {
               delete fixPollTimersRef.current[findingId];
-              const resolvedPhase =
-                fixData.status === 'FIX_VERIFIED' ? 'VERIFIED'
-                : fixData.status === 'FIX_NEEDS_REVIEW' ? 'NEEDS_REVIEW'
-                : fixData.status === 'FIX_UNRESOLVED' ? 'UNRESOLVED'
-                : 'FAILED';
-
               setFixStates((prev) => ({
                 ...prev,
                 [findingId]: {
-                  phase: resolvedPhase,
+                  phase: fixData.status === 'FIX_VERIFIED' ? 'VERIFIED'
+                       : fixData.status === 'FIX_NEEDS_REVIEW' ? 'NEEDS_REVIEW'
+                       : fixData.status === 'FIX_UNRESOLVED' ? 'UNRESOLVED'
+                       : 'FAILED',
                   fixBranch: fixData.fixBranch,
                   summary: fixData.summary,
                   details: fixData.details,
@@ -560,17 +554,14 @@ function ScannerView() {
               }));
 
               addToast({
-                type: resolvedPhase === 'VERIFIED' ? 'success' : (resolvedPhase === 'FAILED' ? 'error' : 'warning'),
-                title: resolvedPhase === 'VERIFIED' ? 'Fix Verified'
-                     : resolvedPhase === 'UNRESOLVED' ? 'Manual Review Required'
-                     : resolvedPhase === 'FAILED' ? 'Fix Failed'
+                type: fixData.status === 'FIX_VERIFIED' ? 'success' : 'warning',
+                title: fixData.status === 'FIX_VERIFIED' ? 'Fix Verified'
+                     : fixData.status === 'FIX_UNRESOLVED' ? 'Manual Review Required'
                      : 'Fix Needs Review',
-                message: resolvedPhase === 'VERIFIED'
+                message: fixData.status === 'FIX_VERIFIED'
                   ? `Pull Request generated for ${findingId}.`
-                  : resolvedPhase === 'UNRESOLVED'
+                  : fixData.status === 'FIX_UNRESOLVED'
                   ? `All bounded remediation attempts exhausted for ${findingId} — a human needs to fix this one directly.`
-                  : resolvedPhase === 'FAILED'
-                  ? `Remediation attempt failed${fixData.error ? `: ${fixData.error}` : '.'}`
                   : `Patch generated but flagged for human review.`,
               });
               return; // terminal — stop scheduling further polls
@@ -606,34 +597,28 @@ function ScannerView() {
               ...prev,
               [findingId]: {
                 ...prev[findingId],
-                phase: 'FAILED',
-                error: 'Connection lost while checking remediation status.',
+                phase: 'PROCESSING',
+                stillProcessingInBackground: true,
               },
             }));
-            addToast({
-              type: 'error',
-              title: 'Remediation Check Failed',
-              message: 'Lost connection while checking fix progress. You can retry the fix attempt.',
-            });
             return;
           }
         }
 
         if (elapsedMs >= OUTER_CEILING_MS) {
+          // Our own polling window elapsed — this is NOT the backend
+          // reporting failure. Say so honestly; never write phase:'FAILED'
+          // here. The finding may still verify, need review, or genuinely
+          // fail — the browser just isn't going to wait to find out.
           delete fixPollTimersRef.current[findingId];
           setFixStates((prev) => ({
             ...prev,
             [findingId]: {
               ...prev[findingId],
-              phase: 'FAILED',
-              error: 'Remediation timed out after waiting for verification.',
+              phase: 'PROCESSING',
+              stillProcessingInBackground: true,
             },
           }));
-          addToast({
-            type: 'error',
-            title: 'Remediation Timed Out',
-            message: 'Remediation took longer than expected and timed out. You can retry.',
-          });
           return;
         }
 

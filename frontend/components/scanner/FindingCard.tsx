@@ -183,11 +183,11 @@ export default function FindingCard({
 
   const attempts = fixStatus?.attempts || 0;
   const maxAttemptsReached = attempts >= 3;
+  const isFixing = fixStatus?.phase === 'QUEUED' || fixStatus?.phase === 'PROCESSING' || approving;
   const isVerified = fixStatus?.phase === 'VERIFIED';
   const isNeedsReview = fixStatus?.phase === 'NEEDS_REVIEW';
   const isFailed = fixStatus?.phase === 'FAILED';
   const isUnresolved = fixStatus?.phase === 'UNRESOLVED';
-  const isFixing = !isFailed && !isUnresolved && (fixStatus?.phase === 'QUEUED' || fixStatus?.phase === 'PROCESSING' || approving);
   const isSettled = isVerified || isNeedsReview || isFailed || isUnresolved;
 
   // Never fabricate a patch. If the backend hasn't generated one yet (or a
@@ -446,19 +446,19 @@ export default function FindingCard({
           <div className="rounded-xl border border-border-default bg-bg-card/70 p-3">
             <div className="flex items-center justify-between text-[11px] font-mono text-text-muted mb-2 pb-1.5 border-b border-border-default/50">
               <span className="flex items-center gap-1.5 font-semibold text-text-primary">
-                <span className={`w-2 h-2 rounded-full ${isFailed ? 'bg-accent-rose' : isVerified ? 'bg-accent-emerald' : isNeedsReview ? 'bg-accent-amber' : 'bg-accent-cyan pulse-dot'}`} />
+                <span className="w-2 h-2 rounded-full bg-accent-cyan pulse-dot" />
                 PatchLine Autonomous Remediation Track
               </span>
-              <span className={`text-[10px] ${isFailed ? 'text-accent-rose font-semibold' : isNeedsReview ? 'text-accent-amber' : 'text-accent-cyan'}`}>
-                {isVerified ? 'Completed · PR Active' : isFixing ? 'Synthesis & Verification in Flight' : isNeedsReview ? 'Human Review Needed' : isUnresolved ? 'Attempts Exhausted' : isFailed ? 'Remediation Attempt Failed' : 'Awaiting Authorization'}
+              <span className="text-[10px] text-accent-cyan">
+                {isVerified ? 'Completed · PR Active' : isFixing ? 'Synthesis & Verification in Flight' : isNeedsReview ? 'Human Review Needed' : isUnresolved ? 'Attempts Exhausted' : 'Awaiting Authorization'}
               </span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
-                { step: 1, label: 'Branch & RAG', key: 'BRANCH', active: isFixing && (!fixStatus?.stage || fixStatus?.stage === 'FIX_GENERATING'), done: isVerified || isSettled || (isFixing && fixStatus?.stage && fixStatus?.stage !== 'FIX_GENERATING') },
-                { step: 2, label: 'AI Patch Synthesis', key: 'SYNTHESIS', active: isFixing && fixStatus?.stage === 'FIX_GENERATING', done: isVerified || (isSettled && Boolean(fixStatus?.summary)) || (isFixing && (fixStatus?.stage === 'CODEX_VERIFYING' || fixStatus?.stage === 'DETERMINISTIC_VERIFYING' || fixStatus?.stage === 'RISK_RECALCULATING')) },
-                { step: 3, label: 'Dual Verification', key: 'VERIFY', active: isFixing && (fixStatus?.stage === 'CODEX_VERIFYING' || fixStatus?.stage === 'DETERMINISTIC_VERIFYING'), done: isVerified || (isFixing && fixStatus?.stage === 'RISK_RECALCULATING'), failed: isNeedsReview || isFailed || isUnresolved },
+                { step: 1, label: 'Branch & RAG', key: 'BRANCH', active: isFixing && (!fixStatus?.stage || fixStatus?.stage === 'FIX_GENERATING'), done: isVerified || (isFixing && fixStatus?.stage && fixStatus?.stage !== 'FIX_GENERATING') },
+                { step: 2, label: 'AI Patch Synthesis', key: 'SYNTHESIS', active: isFixing && fixStatus?.stage === 'FIX_GENERATING', done: isVerified || (isFixing && (fixStatus?.stage === 'CODEX_VERIFYING' || fixStatus?.stage === 'DETERMINISTIC_VERIFYING' || fixStatus?.stage === 'RISK_RECALCULATING')) },
+                { step: 3, label: 'Dual Verification', key: 'VERIFY', active: isFixing && (fixStatus?.stage === 'CODEX_VERIFYING' || fixStatus?.stage === 'DETERMINISTIC_VERIFYING'), done: isVerified || (isFixing && fixStatus?.stage === 'RISK_RECALCULATING'), failed: isNeedsReview || isFailed },
                 { step: 4, label: 'GitHub PR & Sync', key: 'DEPLOY', active: isFixing && fixStatus?.stage === 'RISK_RECALCULATING', done: isVerified },
               ].map((st) => (
                 <div
@@ -508,7 +508,7 @@ export default function FindingCard({
             </div>
 
             <p className="text-text-secondary text-xs leading-relaxed">
-              {fixStatus?.summary || (isFixing ? 'Synthesizing minimal, syntax-accurate patch on isolated branch…' : isFailed ? (fixStatus?.error || 'Fix synthesis or verification failed for this attempt.') : 'No synthesis summary reported by the backend for this attempt.')}
+              {fixStatus?.summary || (isFixing ? 'Synthesizing minimal, syntax-accurate patch on isolated branch…' : 'No synthesis summary reported by the backend for this attempt.')}
             </p>
           </div>
 
