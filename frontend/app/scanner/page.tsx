@@ -180,6 +180,36 @@ function ScannerView() {
       .then(({ data }) => {
         setScanResult({ scanId: paramScanId, ...data } as ScanResult);
         setActiveStage(5); // 6-stage pipeline (0-5) — 5 is "Awaiting Approval"
+        if (data.fixes) {
+          const mapped: Record<string, FixStatus> = {};
+          Object.entries(data.fixes).forEach(([fId, fix]: [string, any]) => {
+            mapped[fId] = {
+              phase: fix.status === 'FIX_VERIFIED' ? 'VERIFIED'
+                   : fix.status === 'FIX_NEEDS_REVIEW' ? 'NEEDS_REVIEW'
+                   : fix.status === 'FIX_UNRESOLVED' ? 'UNRESOLVED'
+                   : fix.status === 'FIX_FAILED' ? 'FAILED'
+                   : fix.status === 'FIX_PROCESSING' || fix.status === 'FIX_QUEUED' ? 'PROCESSING'
+                   : null,
+              fixBranch: fix.fixBranch,
+              summary: fix.summary,
+              details: fix.details,
+              similarPastFixes: fix.similarPastFixes,
+              pullRequest: fix.pullRequest,
+              jiraTicket: fix.jiraTicket,
+              error: fix.error,
+              attempts: fix.attempts,
+              ragMemoryEnabled: data.ragMemoryEnabled ?? true,
+              fixModel: fix.model,
+              fixProvider: fix.provider,
+              verifyModel: fix.codexReview?.model,
+              verifyProvider: fix.codexReview?.provider,
+              aiVerification: fix.aiVerification ?? null,
+              deterministicVerification: fix.deterministicVerification ?? null,
+              riskEvaluation: fix.riskEvaluation ?? null,
+            };
+          });
+          setFixStates(mapped);
+        }
       })
       .catch((err) => {
         setError(
@@ -296,8 +326,10 @@ function ScannerView() {
               mapped[fId] = {
                 phase: fix.status === 'FIX_VERIFIED' ? 'VERIFIED'
                      : fix.status === 'FIX_NEEDS_REVIEW' ? 'NEEDS_REVIEW'
+                     : fix.status === 'FIX_UNRESOLVED' ? 'UNRESOLVED'
                      : fix.status === 'FIX_FAILED' ? 'FAILED'
-                     : 'PROCESSING',
+                     : fix.status === 'FIX_PROCESSING' || fix.status === 'FIX_QUEUED' ? 'PROCESSING'
+                     : null,
                 fixBranch: fix.fixBranch,
                 summary: fix.summary,
                 details: fix.details,
