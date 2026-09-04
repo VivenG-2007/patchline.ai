@@ -15,7 +15,11 @@ function isConfigured() {
 }
 
 function _privateKeyPem() {
-  return Buffer.from(env.githubApp.privateKeyBase64, 'base64').toString('utf8');
+  const raw = (env.githubApp.privateKeyBase64 || '').trim();
+  if (raw.startsWith('-----BEGIN')) {
+    return raw;
+  }
+  return Buffer.from(raw, 'base64').toString('utf8');
 }
 
 function signAppJwt() {
