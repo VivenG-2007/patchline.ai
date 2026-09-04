@@ -39,8 +39,14 @@ async function getConnection(userId) {
           username: installation.accountLogin,
         };
       }
-    } catch {
-      // Fall through to OAuth
+    } catch (err) {
+      logger.error({ err: err.message, userId }, 'GitHub App installation resolution failed');
+      if (env.githubAuthMode === 'github_app') {
+        const enhancedErr = new Error(`GitHub App installation found but token generation failed: ${err.message}`);
+        enhancedErr.status = err.status || 502;
+        enhancedErr.code = 'GITHUB_APP_TOKEN_ERROR';
+        throw enhancedErr;
+      }
     }
   }
 
@@ -65,7 +71,9 @@ async function listRepos(userId, { perPage = 100 } = {}) {
       timeoutMs: env.timeouts.github,
     });
     if (!response.ok) {
-      const err = new Error('Failed to list GitHub repositories from App installation');
+      const errBody = await response.text().catch(() => '');
+      logger.error({ status: response.status, errBody }, 'Failed to list GitHub repositories from App installation');
+      const err = new Error(`Failed to list GitHub repositories from App installation: ${response.status} ${errBody}`.trim());
       err.status = 502;
       throw err;
     }
