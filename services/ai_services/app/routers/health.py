@@ -11,7 +11,10 @@ router = APIRouter()
 _start_time = time.time()
 
 
+@router.get("/")
+@router.head("/")
 @router.get("/health")
+@router.head("/health")
 async def health():
     settings = get_settings()
     return {"status": "ok", "service": settings.service_name}
