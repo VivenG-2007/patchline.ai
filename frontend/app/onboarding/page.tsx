@@ -212,9 +212,18 @@ function StepCard({
   onContinue: () => void;
 }) {
   const [connecting, setConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const handleConnect = async () => {
     setConnecting(true);
-    try { await onConnect(); } finally { setConnecting(false); }
+    setError(null);
+    try {
+      await onConnect();
+    } catch (err: any) {
+      const msg = err?.response?.data?.error?.message || err?.message || 'Failed to start connection. Please check server configuration.';
+      setError(msg);
+    } finally {
+      setConnecting(false);
+    }
   };
   return (
     <div className="space-y-6">
@@ -225,6 +234,8 @@ function StepCard({
         <h1 className="font-display text-2xl font-bold text-text-primary mt-1">{title}</h1>
         <p className="text-xs text-text-secondary mt-1.5 leading-relaxed">{description}</p>
       </div>
+
+      {error && <Alert className="mb-2">{error}</Alert>}
 
       {connected ? (
         <div className="flex items-center gap-2 text-xs font-mono text-accent-emerald bg-accent-emerald-soft p-3 rounded-lg border border-accent-emerald/30">

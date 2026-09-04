@@ -1,24 +1,66 @@
 const { fetchWithTimeout } = require('../utils/httpClient');
 const githubConfig = require('../config/github');
+const githubApp = require('../config/githubApp');
 const tokenStore = require('./githubTokenStore');
+const installationStore = require('./githubAppInstallationStore');
 const env = require('../config/env');
 
-// No refresh logic needed here — classic GitHub OAuth App tokens don't
-// expire, so getConnection() is enough (contrast with jiraService.js, which
-// has to check expiry and refresh on every call).
 async function getConnection(userId) {
-  const connection = await tokenStore.getConnection(userId);
-  if (!connection) {
-    const err = new Error('GitHub is not connected for this account — visit /api/github/oauth/start first');
-    err.status = 409;
-    err.code = 'GITHUB_NOT_CONNECTED';
-    throw err;
+  // 1. Try GitHub App installation token (preferred / default mode)
+  if (githubApp.isConfigured()) {
+    try {
+      const installation = await installationStore.getInstallationForUser(userId);
+      if (installation) {
+        const { token } = await githubApp.getInstallationToken(installation.installationId);
+        return {
+          accessToken: token,
+          type: 'github_app',
+          installationId: installation.installationId,
+          username: installation.accountLogin,
+        };
+      }
+    } catch {
+      // Fall through to OAuth connection
+    }
   }
-  return connection;
+
+  // 2. Fall back to classic OAuth App connection if present
+  const connection = await tokenStore.getConnection(userId);
+  if (connection) {
+    return { ...connection, type: 'oauth_app' };
+  }
+
+  const err = new Error('GitHub is not connected for this account — visit /api/github/oauth/start first');
+  err.status = 409;
+  err.code = 'GITHUB_NOT_CONNECTED';
+  throw err;
 }
 
 async function listRepos(userId, { perPage = 30 } = {}) {
   const connection = await getConnection(userId);
+
+  if (connection.type === 'github_app') {
+    const response = await fetchWithTimeout(`${githubConfig.API_BASE}/installation/repositories?per_page=${perPage}`, {
+      headers: { authorization: `Bearer ${connection.accessToken}`, accept: 'application/vnd.github+json', 'user-agent': 'patchline' },
+      timeoutMs: env.timeouts.github,
+    });
+    if (!response.ok) {
+      const err = new Error('Failed to list GitHub repositories from App installation');
+      err.status = 502;
+      throw err;
+    }
+    const data = await response.json();
+    const repos = Array.isArray(data.repositories) ? data.repositories : [];
+    return repos.map((r) => ({
+      id: r.id,
+      fullName: r.full_name,
+      private: r.private,
+      url: r.html_url,
+      description: r.description,
+      updatedAt: r.updated_at,
+    }));
+  }
+
   const response = await fetchWithTimeout(`${githubConfig.API_BASE}/user/repos?sort=updated&per_page=${perPage}`, {
     headers: { authorization: `Bearer ${connection.accessToken}`, accept: 'application/vnd.github+json', 'user-agent': 'patchline' },
     timeoutMs: env.timeouts.github,
@@ -112,9 +154,6 @@ async function listWebhooks(userId, { owner, repo }) {
   return response.json();
 }
 
-// Idempotent: if a hook already pointed at our webhook URL exists on this
-// repo (e.g. a previous watchRepo() call that half-completed), reuse it
-// instead of creating a duplicate that would double-fire every push.
 async function createWebhook(userId, { owner, repo }) {
   if (!githubConfig.isWebhookConfigured()) {
     const err = new Error('GitHub webhook is not configured (GITHUB_WEBHOOK_SECRET / GITHUB_WEBHOOK_URL)');
@@ -164,8 +203,6 @@ async function deleteWebhook(userId, { owner, repo, hookId }) {
     headers: { authorization: `Bearer ${connection.accessToken}`, accept: 'application/vnd.github+json', 'user-agent': 'patchline' },
     timeoutMs: env.timeouts.github,
   });
-  // 404 is fine here — the hook may have already been removed on GitHub's
-  // side (e.g. manually), and unwatchRepo() should still clear our record.
   if (!response.ok && response.status !== 404) {
     const err = new Error('Failed to delete GitHub webhook');
     err.status = 502;
@@ -183,4 +220,3 @@ module.exports = {
   createWebhook,
   deleteWebhook,
 };
-

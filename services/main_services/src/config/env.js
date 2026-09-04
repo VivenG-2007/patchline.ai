@@ -90,7 +90,7 @@ const env = {
   // block only covers the parts this codebase can act on; the App
   // registration itself (permissions, webhook URL, App slug) is a manual
   // one-time step in GitHub's UI, see the migration doc.
-  githubAuthMode: process.env.GITHUB_AUTH_MODE || 'oauth_app', // 'oauth_app' | 'github_app'
+  githubAuthMode: process.env.GITHUB_AUTH_MODE || 'github_app', // 'github_app' | 'oauth_app'
   githubApp: {
     appId: process.env.GITHUB_APP_ID || '',
     // Base64-encoded PEM private key downloaded from the App's settings page.
