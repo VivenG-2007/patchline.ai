@@ -139,7 +139,12 @@ async function processFixJob(job) {
 
     const fixResponse = await fetchWithTimeout(`${env.aiStorageServiceUrl}/api/v1/scanner/generate-and-verify-fix`, {
       method: 'POST',
-      headers: upstreamHeaders({ authHeader, requestId }),
+      // Fix jobs use x-system-user-id + x-internal-service-token instead of the
+      // caller's browser JWT (authHeader). The browser JWT expires in 15 minutes
+      // but fix jobs can queue for longer — especially when 3 fixes run sequentially.
+      // require_auth_optional() on ai-storage-service trusts x-system-user-id when
+      // x-internal-service-token is present (see core/security.py).
+      headers: upstreamHeaders({ userId, requestId }),
       body: JSON.stringify({ scanId, findingId, repoOwner, repoName, branch, githubToken }),
       // Generous: fix generation + AI verification + a rescan pass — see env.timeouts.fix.
       timeoutMs: env.timeouts.fix,
