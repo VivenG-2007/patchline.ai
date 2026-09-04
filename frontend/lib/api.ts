@@ -35,6 +35,35 @@ export const filesApi = {
   list: () => mainApi.get('/api/proxy/api/files'),
 };
 
+// ---------------------------------------------------------------------------
+// In-memory token store
+// ---------------------------------------------------------------------------
+// In production, auth-service and main-service are on different domains.
+// The browser will send the httpOnly access_token cookie back to auth-service
+// requests only — NOT to main-service (cross-domain cookies are blocked).
+// Auth-service already returns the accessToken in the JSON response body, so
+// we store it here and inject it as an Authorization: Bearer header on every
+// mainApi request. On localhost the cookie also works, so this is strictly
+// additive and doesn't break anything.
+let _accessToken: string | null = null;
+
+export function setAccessToken(token: string | null) {
+  _accessToken = token;
+}
+
+export function clearAccessToken() {
+  _accessToken = null;
+}
+
+// Inject Bearer token into every mainApi request.
+mainApi.interceptors.request.use((config) => {
+  if (_accessToken) {
+    config.headers = config.headers ?? {};
+    config.headers['Authorization'] = `Bearer ${_accessToken}`;
+  }
+  return config;
+});
+
 let refreshing: Promise<unknown> | null = null;
 
 // One shared 401 interceptor: on the first 401, try /refresh once and replay
@@ -50,11 +79,14 @@ mainApi.interceptors.response.use(
       original._retry = true;
       try {
         refreshing = refreshing || authApi.post('/api/auth/refresh');
-        await refreshing;
+        const refreshRes = await refreshing as any;
         refreshing = null;
+        // Store the new access token so subsequent mainApi calls include it.
+        if (refreshRes?.data?.accessToken) setAccessToken(refreshRes.data.accessToken);
         return mainApi(original);
       } catch (refreshErr) {
         refreshing = null;
+        clearAccessToken();
         return Promise.reject(refreshErr);
       }
     }
@@ -80,11 +112,13 @@ authApi.interceptors.response.use(
       original._retry = true;
       try {
         refreshing = refreshing || authApi.post('/api/auth/refresh');
-        await refreshing;
+        const refreshRes = await refreshing as any;
         refreshing = null;
+        if (refreshRes?.data?.accessToken) setAccessToken(refreshRes.data.accessToken);
         return authApi(original);
       } catch (refreshErr) {
         refreshing = null;
+        clearAccessToken();
         return Promise.reject(refreshErr);
       }
     }
