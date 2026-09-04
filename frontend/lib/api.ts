@@ -133,8 +133,7 @@ export const jiraApi = {
   // `returnTo` lets a caller (e.g. the onboarding wizard) get sent back to a
   // specific in-app page instead of always landing on /jira.
   connectUrl: (returnTo?: string) =>
-    `${process.env.NEXT_PUBLIC_MAIN_API_URL || 'http://localhost:5001'}/api/jira/oauth/start${
-      returnTo ? `?redirect=${encodeURIComponent(returnTo)}` : ''
+    `${process.env.NEXT_PUBLIC_MAIN_API_URL || 'http://localhost:5001'}/api/jira/oauth/start${returnTo ? `?redirect=${encodeURIComponent(returnTo)}` : ''
     }`,
   disconnect: () => mainApi.delete('/api/jira/disconnect'),
   createIssue: (payload: { summary: string; description: string; issueType?: string }) =>
@@ -145,8 +144,7 @@ export const jiraApi = {
 export const githubApi = {
   status: () => mainApi.get('/api/github/status'),
   connectUrl: (returnTo?: string) =>
-    `${process.env.NEXT_PUBLIC_MAIN_API_URL || 'http://localhost:5001'}/api/github/oauth/start${
-      returnTo ? `?redirect=${encodeURIComponent(returnTo)}` : ''
+    `${process.env.NEXT_PUBLIC_MAIN_API_URL || 'http://localhost:5001'}/api/github/oauth/start${returnTo ? `?redirect=${encodeURIComponent(returnTo)}` : ''
     }`,
   disconnect: () => mainApi.delete('/api/github/disconnect'),
   listRepos: () => mainApi.get('/api/github/repos'),
