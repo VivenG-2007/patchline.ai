@@ -149,15 +149,35 @@ async function processFixJob(job) {
   try {
     await scanStore.transitionFix(scanId, findingId, 'FIX_PROCESSING', { startedAt: new Date().toISOString() });
 
+    // Resolve a fresh token if the one from the job is stale/missing —
+    // GitHub App installation tokens expire after 1 hour; a long-queued job
+    // may have waited past that, or the token was never stored in job data.
+    // Both generate-and-verify-fix (branch creation, commit) and createPullRequest
+    // need this token.
+    let effectiveToken = githubToken;
+    if (!effectiveToken) {
+      try {
+        effectiveToken = await githubService.getRepoToken(repoOwner, repoName, userId);
+        if (effectiveToken) {
+          logger.info({ scanId, findingId }, 'Resolved fresh GitHub token for fix pipeline via getRepoToken()');
+        }
+      } catch (tokenErr) {
+        logger.warn({ tokenErr: tokenErr.message, scanId, findingId }, 'Could not resolve token via getRepoToken');
+      }
+    }
+    if (!effectiveToken) {
+      try {
+        const conn = await githubService.getConnection(userId);
+        effectiveToken = conn?.accessToken;
+      } catch (connErr) {
+        logger.warn({ connErr: connErr.message, userId }, 'Could not resolve token via getConnection');
+      }
+    }
+
     const fixResponse = await fetchWithTimeout(`${env.aiStorageServiceUrl}/api/v1/scanner/generate-and-verify-fix`, {
       method: 'POST',
-      // Fix jobs use x-system-user-id + x-internal-service-token instead of the
-      // caller's browser JWT (authHeader). The browser JWT expires in 15 minutes
-      // but fix jobs can queue for longer — especially when 3 fixes run sequentially.
-      // require_auth_optional() on ai-storage-service trusts x-system-user-id when
-      // x-internal-service-token is present (see core/security.py).
       headers: upstreamHeaders({ userId, requestId }),
-      body: JSON.stringify({ scanId, findingId, repoOwner, repoName, branch, githubToken }),
+      body: JSON.stringify({ scanId, findingId, repoOwner, repoName, branch, githubToken: effectiveToken }),
       // Generous: fix generation + AI verification + a rescan pass — see env.timeouts.fix.
       timeoutMs: env.timeouts.fix,
     });
@@ -239,23 +259,6 @@ async function processFixJob(job) {
         logger.info({ scanId, findingId, jobId: job.id }, 'fix job completed — not verified, needs human review');
       }
       return;
-    }
-
-    // Resolve a fresh token if the one from the job is stale/missing —
-    // GitHub App installation tokens expire after 1 hour; a long-queued job
-    // may have waited past that, or the token was never stored in job data
-    // (webhook-triggered scans). getRepoToken() checks the user's stored
-    // connection first, then falls back to the App installation for the repo.
-    let effectiveToken = githubToken;
-    if (!effectiveToken) {
-      try {
-        effectiveToken = await githubService.getRepoToken(repoOwner, repoName, userId);
-        if (effectiveToken) {
-          logger.info({ scanId, findingId }, 'Resolved fresh GitHub token for PR creation via getRepoToken()');
-        }
-      } catch (tokenErr) {
-        logger.warn({ tokenErr: tokenErr.message, scanId, findingId }, 'Could not resolve fresh GitHub token — PR creation may fail');
-      }
     }
 
     let pr = null;

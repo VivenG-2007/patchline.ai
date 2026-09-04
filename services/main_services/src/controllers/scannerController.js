@@ -108,6 +108,13 @@ async function approveAndFix(req, res, next) {
     let token = req.body.githubToken || scanRecord.githubToken;
     if (!token) {
       try {
+        token = await githubService.getRepoToken(scanRecord.repoOwner, scanRecord.repoName, req.user.id);
+      } catch (repoTokenErr) {
+        logger.warn({ repoTokenErr: repoTokenErr.message, userId: req.user.id }, 'Could not resolve repo token via getRepoToken in approveAndFix');
+      }
+    }
+    if (!token) {
+      try {
         const connection = await githubService.getConnection(req.user.id);
         token = connection?.accessToken;
       } catch (connErr) {

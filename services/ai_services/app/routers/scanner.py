@@ -807,21 +807,38 @@ def _rescan_verify_fix(finding: dict, fixed_content: str) -> Optional[dict]:
     `ruleKey` (i.e. it came from the AI supplemental pass, not the pattern
     scanner) — there is no rule to independently re-check in that case, and
     the caller falls back to the AI opinion pass alone.
-
-    This directly replaces "ask the AI whether its own patch worked" with
-    "run the free, deterministic, non-LLM detector again and see if it still
-    fires" — the same rescan-based verification the product spec calls for.
     """
-    rule_key = finding.get("ruleKey")
+    rule_key = finding.get("ruleKey") or finding.get("rule_key")
     if not rule_key:
         return None
     file_path = finding.get("file", "")
     post_fix_findings = scan_file(file_path, fixed_content)
-    still_present = [f for f in post_fix_findings if f["ruleKey"] == rule_key]
+    still_present = [f for f in post_fix_findings if (f.get("ruleKey") or f.get("rule_key")) == rule_key]
+    
+    if len(still_present) == 0:
+        return {
+            "resolved": True,
+            "remainingMatches": 0,
+            "matchedLines": [],
+        }
+
+    # If the file has multiple instances of the same rule (e.g. line 10 and line 90),
+    # check if the specific occurrence targeted by this finding was eliminated.
+    target_line = finding.get("line")
+    if target_line is not None:
+        near_target = [f for f in still_present if abs((f.get("line") or 0) - target_line) <= 5]
+        if len(near_target) == 0:
+            return {
+                "resolved": True,
+                "remainingMatches": len(still_present),
+                "matchedLines": [f.get("line", 0) for f in still_present],
+                "note": "Target line occurrence resolved; remaining matches are elsewhere in file",
+            }
+
     return {
-        "resolved": len(still_present) == 0,
+        "resolved": False,
         "remainingMatches": len(still_present),
-        "matchedLines": [f["line"] for f in still_present],
+        "matchedLines": [f.get("line", 0) for f in still_present],
     }
 
 
@@ -859,7 +876,35 @@ def _strip_code_fences(raw: str) -> str:
 
 
 def _parse_json_object(raw: str) -> dict:
-    return json.loads(_strip_code_fences(raw))
+    cleaned = _strip_code_fences(raw)
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+
+    # Extract JSON enclosed in code fence
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1).strip())
+        except Exception:
+            pass
+
+    # Extract outermost JSON object { ... }
+    first_brace = raw.find("{")
+    last_brace = raw.rfind("}")
+    if first_brace != -1 and last_brace > first_brace:
+        candidate = raw[first_brace:last_brace + 1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            candidate_clean = re.sub(r",\s*([\}\]])", r"\1", candidate)
+            try:
+                return json.loads(candidate_clean)
+            except Exception:
+                pass
+
+    raise ValueError(f"Could not parse valid JSON object from LLM response (len={len(raw)})")
 
 
 async def _enrich_deterministic_findings(
