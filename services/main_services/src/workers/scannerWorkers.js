@@ -202,7 +202,9 @@ async function processFixJob(job) {
 
     if (!fixResponse.ok) {
       const errorText = await fixResponse.text();
-      throw new Error(`AI fix generation failed: ${errorText || fixResponse.statusText}`);
+      const err = new Error(`AI fix generation failed: ${errorText || fixResponse.statusText}`);
+      err.status = fixResponse.status;
+      throw err;
     }
 
     const fixResult = await fixResponse.json();
@@ -336,12 +338,12 @@ async function processFixJob(job) {
   } catch (err) {
     logger.error({ err, scanId, findingId, jobId: job.id, attempt: job.attemptsMade + 1 }, 'fix job failed');
     const attemptsAllowed = job.opts?.attempts || 1;
-    const isFinalAttempt = job.attemptsMade + 1 >= attemptsAllowed;
+    const isNonRetryable = err.status && err.status >= 400 && err.status < 500;
+    const isFinalAttempt = (job.attemptsMade + 1 >= attemptsAllowed) || isNonRetryable;
     if (isFinalAttempt) {
-      // Same reasoning as the scan worker: only stamp the terminal
-      // FIX_FAILED status (which a human can retry from, bounded by
-      // MAX_FIX_ATTEMPTS) once BullMQ itself has no more job-level retries
-      // left, so intermediate retries don't collide with the state machine.
+      // Stamp the terminal FIX_FAILED status (which a human can retry from,
+      // bounded by MAX_FIX_ATTEMPTS) so the UI shows failure with retry
+      // option rather than getting stuck on "Fixing...".
       try {
         await scanStore.transitionFix(scanId, findingId, 'FIX_FAILED', {
           error: err.message,
@@ -371,7 +373,19 @@ function startWorkers() {
   });
 
   scanWorker.on('failed', (job, err) => logger.error({ err, jobId: job?.id, scanId: job?.data?.scanId }, 'scan worker job failed'));
-  fixWorker.on('failed', (job, err) => logger.error({ err, jobId: job?.id, scanId: job?.data?.scanId, findingId: job?.data?.findingId }, 'fix worker job failed'));
+  fixWorker.on('failed', async (job, err) => {
+    logger.error({ err, jobId: job?.id, scanId: job?.data?.scanId, findingId: job?.data?.findingId }, 'fix worker job failed');
+    if (job?.data?.scanId && job?.data?.findingId) {
+      try {
+        await scanStore.transitionFix(job.data.scanId, job.data.findingId, 'FIX_FAILED', {
+          error: err?.message || 'Fix job failed after retries',
+          failedAt: new Date().toISOString(),
+        });
+      } catch (transitionErr) {
+        logger.warn({ transitionErr, scanId: job.data.scanId, findingId: job.data.findingId }, 'could not record FIX_FAILED in failed listener');
+      }
+    }
+  });
 
   return { scanWorker, fixWorker };
 }
