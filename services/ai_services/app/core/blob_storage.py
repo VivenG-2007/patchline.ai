@@ -22,26 +22,3 @@ async def ensure_container() -> None:
         return
     if not await client.exists():
         await client.create_container()  # private by default — no public/anonymous access
-
-
-def get_container_url() -> str | None:
-    """Return the Azure Blob container URL, e.g. https://<account>.blob.core.windows.net/<container>."""
-    client = get_container_client()
-    if client is not None and getattr(client, "url", None):
-        return client.url
-    settings = get_settings()
-    if settings.azure_storage_connection_string and settings.azure_storage_container:
-        try:
-            parts = dict(
-                item.split("=", 1)
-                for item in settings.azure_storage_connection_string.split(";")
-                if "=" in item
-            )
-            account_name = parts.get("AccountName")
-            endpoint_suffix = parts.get("EndpointSuffix", "core.windows.net")
-            if account_name:
-                return f"https://{account_name}.blob.{endpoint_suffix}/{settings.azure_storage_container}"
-        except Exception:
-            pass
-    return None
-

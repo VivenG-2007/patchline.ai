@@ -5,14 +5,14 @@ import json
 import re
 import uuid
 import datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.config import get_settings
 from app.core import es_client, github_http, memory_store
-from app.core.blob_storage import get_container_client, get_container_url
+from app.core.blob_storage import get_container_client
 from app.core.db import get_db
 from app.core.fingerprint import find_duplicate_strategy
 from app.core.logging import get_logger
@@ -157,7 +157,6 @@ class ScanResponse(BaseModel):
     findingsCount: int
     findings: List[Finding]
     blobUri: Optional[str] = None
-    containerUrl: Optional[str] = None
     blobName: Optional[str] = None
     scanTier: Optional[str] = None
     aiAnalysisNote: Optional[str] = None
@@ -214,12 +213,12 @@ async def get_ai_provider_status():
 
 # ──────────────────────── Blob helpers ────────────────────────
 
-async def _upload_report_to_blob(scan_id: str, report: dict) -> Tuple[Optional[str], Optional[str]]:
-    """Upload scan report JSON to Azure Blob Storage. Returns (blob_url, container_url)."""
+async def _upload_report_to_blob(scan_id: str, report: dict) -> Optional[str]:
+    """Upload scan report JSON to Azure Blob Storage. Returns blob URL or None."""
     client = get_container_client()
     if client is None:
         logger.warning("azure_blob_not_configured_skipping_upload")
-        return None, None
+        return None
     try:
         blob_name = f"scans/{scan_id}/report.json"
         data = json.dumps(report, indent=2, default=str).encode("utf-8")
@@ -227,12 +226,11 @@ async def _upload_report_to_blob(scan_id: str, report: dict) -> Tuple[Optional[s
         await blob_client.upload_blob(data, overwrite=True, content_settings=None)
         # Return the blob URL (no SAS — private container; main-service can generate SAS if needed)
         url = blob_client.url
-        container_url = get_container_url() or getattr(client, "url", None)
         logger.info("scan_report_uploaded_to_blob", scan_id=scan_id, blob_name=blob_name)
-        return url, container_url
+        return url
     except Exception as exc:
         logger.warning("blob_upload_failed", scan_id=scan_id, error=str(exc))
-        return None, None
+        return None
 
 
 async def _save_scan_metadata(meta: dict) -> None:
@@ -1560,7 +1558,7 @@ async def _run_scan_pipeline(payload: ScanRequest, user: CurrentUser, scan_id: s
     }
 
     # Upload to Azure Blob
-    blob_uri, container_url = await _upload_report_to_blob(scan_id, report_payload)
+    blob_uri = await _upload_report_to_blob(scan_id, report_payload)
     blob_name = f"scans/{scan_id}/report.json"
 
     # Save metadata to MongoDB
@@ -1580,7 +1578,6 @@ async def _run_scan_pipeline(payload: ScanRequest, user: CurrentUser, scan_id: s
         "aiAnalysisNote": ai_analysis_note,
         "status": "COMPLETED_WAITING_APPROVAL",
         "blobUri": blob_uri,
-        "containerUrl": container_url,
         "blobName": blob_name,
         "findings": [f.model_dump() for f in findings],
         "ragMemoryEnabled": memory_store.is_enabled(),
@@ -1594,7 +1591,6 @@ async def _run_scan_pipeline(payload: ScanRequest, user: CurrentUser, scan_id: s
         findingsCount=len(findings),
         findings=findings,
         blobUri=blob_uri,
-        containerUrl=container_url,
         blobName=blob_name,
         scanTier=tier,
         aiAnalysisNote=ai_analysis_note,

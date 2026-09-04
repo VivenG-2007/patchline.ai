@@ -53,55 +53,39 @@ async function processScanJob(job) {
 
     // Optionally auto-create a Jira ticket if the user has Jira connected —
     // best-effort, never fails the scan job itself.
+    //
+    // BUG FIXED: jiraService.createIssue() takes ONE object argument
+    // ({ userId, summary, description, issueType }) — see jiraService.js.
+    // This call was passing userId as a separate positional first argument
+    // (copy-pasted from githubService.createIssue()'s different signature),
+    // so `userId` was silently undefined inside createIssue on every call.
+    // That made getValidConnection(undefined) always throw JIRA_NOT_CONNECTED,
+    // which landed in the catch below and was swallowed as a warning — so no
+    // ticket was EVER actually created, even for a user with Jira properly
+    // connected, and jiraTicket stayed null every time.
     let jiraTicket = null;
     try {
-      const findingsCount = (scanResults.findings || []).length;
-      const isClean = findingsCount === 0;
-      const containerUrl = scanResults.containerUrl || 'N/A';
-      const blobUri = scanResults.blobUri || 'N/A';
-
-      const summary = isClean
-        ? `[Patchline AI] Clean Security Scan: ${repoOwner}/${repoName}`
-        : `[Patchline AI] Security Vulnerabilities in ${repoOwner}/${repoName}`;
-
-      let description =
-        `Patchline AI Security Scan completed for ${repoOwner}/${repoName} (${branch || 'main'}).\n\n` +
-        `Azure Container URL: ${containerUrl}\n` +
-        `Azure Blob URI: ${blobUri}\n` +
-        `Scan ID: ${scanId}\n` +
-        `Total Findings: ${findingsCount}\n`;
-
-      if (scanResults.aiAnalysisNote) {
-        description += `\nAI Analysis Note:\n${scanResults.aiAnalysisNote}\n`;
-      }
-
-      if (!isClean && scanResults.findings && scanResults.findings.length > 0) {
-        description += `\nTop Findings:\n`;
-        scanResults.findings.slice(0, 10).forEach((f, idx) => {
-          description += `${idx + 1}. [${(f.severity || 'INFO').toUpperCase()}] ${f.title || f.category} in ${f.file}:${f.line || '?'}\n`;
+      if (scanResults.findings && scanResults.findings.length > 0) {
+        jiraTicket = await jiraService.createIssue({
+          userId,
+          summary: `[DevSecOps AI] Security Vulnerabilities in ${repoOwner}/${repoName}`,
+          description:
+            `AI Vulnerability Scan completed.\nFound ${scanResults.findings.length} issue(s).\n` +
+            `Scan ID: ${scanId}\nBlob URI: ${scanResults.blobUri || 'N/A'}` +
+            (scanResults.aiAnalysisNote ? `\n\n${scanResults.aiAnalysisNote}` : ''),
+          issueType: 'Bug',
         });
-        if (scanResults.findings.length > 10) {
-          description += `...and ${scanResults.findings.length - 10} more finding(s).\n`;
-        }
-      }
-
-      jiraTicket = await jiraService.createIssue({
-        userId,
-        summary,
-        description,
-        issueType: isClean ? 'Task' : 'Bug',
-      });
-
-      if (jiraTicket) {
-        try {
-          await fetchWithTimeout(`${env.aiStorageServiceUrl}/api/v1/scanner/scan/${scanId}/jira-ticket`, {
-            method: 'POST',
-            headers: upstreamHeaders({ userId, requestId }),
-            body: JSON.stringify({ jiraTicket }),
-            timeoutMs: env.timeouts.aiStorage,
-          });
-        } catch (syncErr) {
-          logger.warn({ syncErr, scanId }, 'Failed to sync Jira ticket to ai-storage service');
+        if (jiraTicket) {
+          try {
+            await fetchWithTimeout(`${env.aiStorageServiceUrl}/api/v1/scanner/scan/${scanId}/jira-ticket`, {
+              method: 'POST',
+              headers: upstreamHeaders({ userId, requestId }),
+              body: JSON.stringify({ jiraTicket }),
+              timeoutMs: env.timeouts.aiStorage,
+            });
+          } catch (syncErr) {
+            logger.warn({ syncErr, scanId }, 'Failed to sync Jira ticket to ai-storage service');
+          }
         }
       }
     } catch (jiraErr) {
@@ -112,8 +96,6 @@ async function processScanJob(job) {
       findingsCount: (scanResults.findings || []).length,
       findings: scanResults.findings,
       blobUri: scanResults.blobUri,
-      containerUrl: scanResults.containerUrl,
-      blobName: scanResults.blobName,
       scanTier: scanResults.scanTier,
       aiAnalysisNote: scanResults.aiAnalysisNote,
       ragMemoryEnabled: !!scanResults.ragMemoryEnabled,

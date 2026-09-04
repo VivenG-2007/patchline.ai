@@ -206,8 +206,6 @@ export const scannerApi = {
     mainApi.post('/api/scanner/approve-fix', payload),
   createPr: (scanId: string, findingId: string) =>
     mainApi.post(`/api/scanner/scan/${scanId}/finding/${findingId}/create-pr`, {}),
-  raiseJiraTicket: (scanId: string) =>
-    mainApi.post(`/api/scanner/scan/${scanId}/raise-jira`, {}),
   history: (limit = 20) =>
     mainApi.get(`/api/scanner/history?limit=${limit}`),
   // Live AI provider health — Featherless primary / Azure OpenAI fallback

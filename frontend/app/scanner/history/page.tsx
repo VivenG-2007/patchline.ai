@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { ChevronDown, ChevronUp, Package, GitBranch, Search, Plus, Sparkles, ExternalLink, Database } from 'lucide-react';
+import { ChevronDown, ChevronUp, Package, GitBranch, Search, Plus, Sparkles, ExternalLink } from 'lucide-react';
 import ProtectedShell from '@/components/ProtectedShell';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
@@ -32,7 +32,6 @@ type ScanRecord = {
   findingsCount: number;
   status: string;
   blobUri?: string;
-  containerUrl?: string;
   fixBranch?: string;
   fixedAt?: string;
   jiraTicket?: {
@@ -276,18 +275,6 @@ export default function ScanHistoryPage() {
                       title={`Open Jira Ticket ${record.jiraTicket.key}`}
                     >
                       <ExternalLink size={12} /> Jira {record.jiraTicket.key}
-                    </a>
-                  )}
-                  {record.containerUrl && (
-                    <a
-                      href={record.containerUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="px-2.5 py-1.5 bg-accent-cyan-soft/20 border border-accent-cyan/30 hover:border-accent-cyan text-accent-cyan font-mono text-xs rounded-lg transition-colors inline-flex items-center gap-1.5"
-                      title="Azure Storage Container"
-                    >
-                      <Database size={12} /> Container
                     </a>
                   )}
                   {record.blobUri && (
