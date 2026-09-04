@@ -292,14 +292,120 @@ async def get_dashboard_stats(user: CurrentUser = Depends(require_auth)) -> dict
     repo_health.sort(key=lambda r: {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}[r["riskLevel"]])
     repos_at_risk.sort(key=lambda r: (r["critical"], r["high"], r["total"]), reverse=True)
 
-    days_order = []
-    d = week_ago
-    while d <= now:
-        days_order.append(d.strftime("%a"))
-        d += datetime.timedelta(days=1)
-    seen = set()
-    ordered_days = [d for d in days_order if not (d in seen or seen.add(d))]
-    risk_series = [{"day": day, "score": round(risk_by_day.get(day, 0), 1)} for day in ordered_days]
+    findings_by_date: dict[str, int] = defaultdict(int)
+    resolved_by_date: dict[str, int] = defaultdict(int)
+    risk_by_date: dict[str, float] = defaultdict(float)
+    findings_by_month: dict[str, int] = defaultdict(int)
+    resolved_by_month: dict[str, int] = defaultdict(int)
+
+    for scan in scans:
+        scanned_at = _parse_dt(scan.get("scannedAt"))
+        findings = scan.get("findings") or []
+        fixes = scan.get("fixes") or {}
+
+        if scanned_at:
+            d_iso = scanned_at.strftime("%Y-%m-%d")
+            m_name = scanned_at.strftime("%b")
+            findings_by_date[d_iso] += len(findings)
+            findings_by_month[m_name] += len(findings)
+            for f in findings:
+                sev = (f.get("severity") or "").upper()
+                risk_by_date[d_iso] += SEVERITY_WEIGHT.get(sev, 0)
+
+        for finding_id, fix in fixes.items():
+            if fix.get("status") == "FIX_VERIFIED":
+                fixed_at = _parse_dt(fix.get("completedAt") or fix.get("fixedAt") or scan.get("scannedAt"))
+                if fixed_at:
+                    f_iso = fixed_at.strftime("%Y-%m-%d")
+                    f_month = fixed_at.strftime("%b")
+                    resolved_by_date[f_iso] += 1
+                    resolved_by_month[f_month] += 1
+
+    # Augment with real Elasticsearch aggregations if active
+    if es_aggs and es_aggs.get("activityOverTime"):
+        for item in es_aggs["activityOverTime"]:
+            d_str = item.get("date", "")[:10]
+            if d_str:
+                findings_by_date[d_str] = item.get("count", 0)
+                resolved_by_date[d_str] = item.get("resolved", 0)
+                risk_by_date[d_str] = item.get("riskScore", 0.0)
+
+    # 1D hourly bins for today
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    hour_bins = ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"]
+    hourly_new = {b: 0 for b in hour_bins}
+    hourly_res = {b: 0 for b in hour_bins}
+    for scan in scans:
+        s_dt = _parse_dt(scan.get("scannedAt"))
+        if s_dt and s_dt >= today_start:
+            h = s_dt.hour
+            bin_name = hour_bins[min(5, h // 4)]
+            hourly_new[bin_name] += len(scan.get("findings") or [])
+        for fix in (scan.get("fixes") or {}).values():
+            if fix.get("status") == "FIX_VERIFIED":
+                f_dt = _parse_dt(fix.get("completedAt") or fix.get("fixedAt") or scan.get("scannedAt"))
+                if f_dt and f_dt >= today_start:
+                    h = f_dt.hour
+                    bin_name = hour_bins[min(5, h // 4)]
+                    hourly_res[bin_name] += 1
+    series_1d = [
+        {"day": b, "newFindings": hourly_new[b], "resolved": hourly_res[b], "score": round(hourly_new[b] * 3.5, 1)}
+        for b in hour_bins
+    ]
+
+    # 1W daily series (last 7 days)
+    series_1w = []
+    d_w = week_ago
+    while d_w <= now:
+        d_iso = d_w.strftime("%Y-%m-%d")
+        d_label = d_w.strftime("%a")
+        series_1w.append({
+            "day": d_label,
+            "date": d_iso,
+            "newFindings": findings_by_date.get(d_iso, 0),
+            "resolved": resolved_by_date.get(d_iso, 0),
+            "score": round(risk_by_date.get(d_iso, 0), 1),
+        })
+        d_w += datetime.timedelta(days=1)
+
+    # 1M series (4 weeks of the past month)
+    series_1m = []
+    for w in range(4):
+        w_start = now - datetime.timedelta(days=(4 - w) * 7)
+        w_end = now - datetime.timedelta(days=(3 - w) * 7)
+        w_new = 0
+        w_res = 0
+        w_risk = 0.0
+        d_cur = w_start
+        while d_cur < w_end:
+            d_iso = d_cur.strftime("%Y-%m-%d")
+            w_new += findings_by_date.get(d_iso, 0)
+            w_res += resolved_by_date.get(d_iso, 0)
+            w_risk += risk_by_date.get(d_iso, 0)
+            d_cur += datetime.timedelta(days=1)
+        series_1m.append({
+            "day": f"Week {w + 1}",
+            "newFindings": w_new,
+            "resolved": w_res,
+            "score": round(w_risk, 1),
+        })
+
+    # 1Y monthly series (past 12 months)
+    months_list = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    current_month_idx = now.month - 1
+    ordered_months = [months_list[(current_month_idx - 11 + i) % 12] for i in range(12)]
+    series_1y = [
+        {
+            "day": m,
+            "newFindings": findings_by_month.get(m, 0),
+            "resolved": resolved_by_month.get(m, 0),
+            "score": round(findings_by_month.get(m, 0) * 3.5, 1),
+        }
+        for m in ordered_months
+    ]
+
+    risk_series = series_1w
+
 
     global_risk_score = min(100, round(critical_open * 10 + high_open * 4 + medium_open * 1.5))
     verification_rate = round((fixes_verified_total / fixes_generated_total * 100), 1) if fixes_generated_total > 0 else 0.0
@@ -393,6 +499,12 @@ async def get_dashboard_stats(user: CurrentUser = Depends(require_auth)) -> dict
         "averageFixTime": "1.2 min" if fixes_verified_total > 0 else "N/A",
         "globalRiskScore": global_risk_score,
         "riskScoreSeries": risk_series,
+        "activitySeries": {
+            "1D": series_1d,
+            "1W": series_1w,
+            "1M": series_1m,
+            "1Y": series_1y,
+        },
         "activityFeed": activity[:15],
         "repoHealth": repo_health,
         "severityBreakdown": {"critical": critical_open, "high": high_open, "medium": medium_open, "low": low_open},

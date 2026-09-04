@@ -19,13 +19,17 @@ import Card from '@/components/ui/Card';
 
 interface TrendItem {
   day: string;
+  date?: string;
   score?: number;
+  newFindings?: number;
+  resolved?: number;
   scans?: number;
   remediated?: number;
 }
 
 interface ScanTrendsChartProps {
   data: TrendItem[];
+  seriesByRange?: Partial<Record<TimeRange, TrendItem[]>>;
   title?: string;
   subtitle?: string;
 }
@@ -60,6 +64,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export default function ScanTrendsChart({
   data,
+  seriesByRange,
   title = 'Security Activity',
   subtitle = 'Open and resolved exposures overtime',
 }: ScanTrendsChartProps) {
@@ -67,51 +72,20 @@ export default function ScanTrendsChart({
   const mounted = useSyncExternalStore(emptySubscribe, getSnapshot, getServerSnapshot);
 
   const chartData = useMemo(() => {
-    const baseWeekly = data.map((item, idx) => ({
-      day: item.day,
-      resolved: item.remediated ?? Math.max(0, Math.round((item.score ?? 10) / 15)),
-      newFindings: item.scans ?? Math.max(1, Math.round(((item.score ?? 10) / 10) + idx * 0.5)),
-    }));
-
-    const baseResolvedSum = baseWeekly.reduce((sum, d) => sum + d.resolved, 0);
-    const baseNewSum = baseWeekly.reduce((sum, d) => sum + d.newFindings, 0);
-
-    if (activeRange === '1D') {
-      return [
-        { day: '00:00', resolved: Math.round(baseResolvedSum * 0.08), newFindings: Math.round(baseNewSum * 0.10) },
-        { day: '04:00', resolved: Math.round(baseResolvedSum * 0.05), newFindings: Math.round(baseNewSum * 0.08) },
-        { day: '08:00', resolved: Math.round(baseResolvedSum * 0.22), newFindings: Math.round(baseNewSum * 0.25) },
-        { day: '12:00', resolved: Math.round(baseResolvedSum * 0.35), newFindings: Math.round(baseNewSum * 0.30) },
-        { day: '16:00', resolved: Math.round(baseResolvedSum * 0.20), newFindings: Math.round(baseNewSum * 0.18) },
-        { day: '20:00', resolved: Math.round(baseResolvedSum * 0.10), newFindings: Math.round(baseNewSum * 0.09) },
-      ];
-    }
-
-    if (activeRange === '1W') {
-      return baseWeekly;
-    }
-
-    if (activeRange === '1M') {
-      return [
-        { day: 'Week 1', resolved: Math.round(baseResolvedSum * 0.8), newFindings: Math.round(baseNewSum * 1.1) },
-        { day: 'Week 2', resolved: Math.round(baseResolvedSum * 1.2), newFindings: Math.round(baseNewSum * 1.4) },
-        { day: 'Week 3', resolved: Math.round(baseResolvedSum * 1.5), newFindings: Math.round(baseNewSum * 1.8) },
-        { day: 'Week 4', resolved: Math.round(baseResolvedSum * 1.1), newFindings: Math.round(baseNewSum * 1.3) },
-      ];
-    }
-
-    if (activeRange === '1Y') {
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const factors = [0.4, 0.5, 0.6, 0.8, 0.7, 0.9, 1.1, 1.3, 1.2, 1.4, 1.6, 1.8];
-      return months.map((month, idx) => ({
-        day: month,
-        resolved: Math.round((baseResolvedSum + 15) * (factors[idx] || 1.0)),
-        newFindings: Math.round((baseNewSum + 25) * ((factors[idx] || 1.0) * 1.15)),
+    if (seriesByRange && seriesByRange[activeRange] && seriesByRange[activeRange]!.length > 0) {
+      return seriesByRange[activeRange]!.map((item) => ({
+        day: item.day,
+        resolved: item.resolved ?? item.remediated ?? 0,
+        newFindings: item.newFindings ?? item.scans ?? 0,
       }));
     }
 
-    return baseWeekly;
-  }, [data, activeRange]);
+    return data.map((item) => ({
+      day: item.day,
+      resolved: item.resolved ?? item.remediated ?? 0,
+      newFindings: item.newFindings ?? item.scans ?? 0,
+    }));
+  }, [data, seriesByRange, activeRange]);
 
   const totalResolved = chartData.reduce((s, d) => s + d.resolved, 0);
   const totalNew = chartData.reduce((s, d) => s + d.newFindings, 0);

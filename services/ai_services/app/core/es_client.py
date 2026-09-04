@@ -263,8 +263,22 @@ async def aggregate_dashboard_metrics(owner_id: str) -> Optional[dict]:
             },
             "avg_risk": {"avg": {"field": "riskScore"}},
             "max_risk": {"max": {"field": "riskScore"}},
+            "activity_over_time": {
+                "date_histogram": {
+                    "field": "scannedAt",
+                    "calendar_interval": "1d",
+                    "min_doc_count": 0,
+                },
+                "aggs": {
+                    "resolved": {
+                        "filter": {"term": {"status": "FIX_VERIFIED"}}
+                    },
+                    "risk_sum": {
+                        "sum": {"field": "riskScore"}
+                    },
+                },
+            },
         }
-
 
         result = await client.search(
             index=FINDINGS_INDEX,
@@ -274,6 +288,17 @@ async def aggregate_dashboard_metrics(owner_id: str) -> Optional[dict]:
         )
         aggregations = result.get("aggregations", {})
         total_hits = result.get("hits", {}).get("total", {}).get("value", 0)
+
+        activity_buckets = aggregations.get("activity_over_time", {}).get("buckets", [])
+        activity_series = [
+            {
+                "date": b.get("key_as_string", str(b.get("key"))),
+                "count": b.get("doc_count", 0),
+                "resolved": b.get("resolved", {}).get("doc_count", 0),
+                "riskScore": b.get("risk_sum", {}).get("value", 0.0),
+            }
+            for b in activity_buckets
+        ]
 
         return {
             "totalFindings": total_hits,
@@ -289,6 +314,7 @@ async def aggregate_dashboard_metrics(owner_id: str) -> Optional[dict]:
             "byRepo": aggregations.get("by_repo", {}).get("buckets", []),
             "avgRisk": aggregations.get("avg_risk", {}).get("value") or 0.0,
             "maxRisk": aggregations.get("max_risk", {}).get("value") or 0.0,
+            "activityOverTime": activity_series,
             "fixProviders": {
                 b["key"]: b["doc_count"] for b in aggregations.get("fix_providers", {}).get("buckets", [])
             },

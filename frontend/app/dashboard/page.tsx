@@ -52,7 +52,13 @@ interface DashboardStats {
     aiFixesApplied: { value: number; windowLabel?: string | null };
   };
   globalRiskScore: number;
-  riskScoreSeries: { day: string; score: number; scans?: number; remediated?: number }[];
+  riskScoreSeries: { day: string; date?: string; score: number; newFindings?: number; resolved?: number; scans?: number; remediated?: number }[];
+  activitySeries?: {
+    '1D': { day: string; newFindings: number; resolved: number; score?: number }[];
+    '1W': { day: string; date?: string; newFindings: number; resolved: number; score?: number }[];
+    '1M': { day: string; newFindings: number; resolved: number; score?: number }[];
+    '1Y': { day: string; newFindings: number; resolved: number; score?: number }[];
+  };
   activityFeed: { id: string; type: string; message: string; repo?: string; timestamp: string }[];
   repoHealth: RepoHealthItem[];
   severityBreakdown: { critical: number; high: number; medium: number; low?: number };
@@ -274,6 +280,7 @@ export default function DashboardPage() {
             <div className="lg:col-span-2">
               <ScanTrendsChart
                 data={stats.riskScoreSeries}
+                seriesByRange={stats.activitySeries}
                 title="Security Activity"
                 subtitle="Open and resolved exposures overtime"
               />
