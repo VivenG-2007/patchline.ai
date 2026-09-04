@@ -6,9 +6,9 @@ PatchLine's model-routing table assigns each pipeline task its own primary
 
     task           primary (Featherless)         fallback
     analysis       Qwen3-Coder-30B-A3B            gpt-4.1-mini
-    rag_ranking    DeepSeek-V4-Flash              gpt-5.2      (not wired — see below)
+    rag_ranking    DeepSeek-V3-0324               gpt-5.2      (not wired — see below)
     fix            Qwen3-Coder-480B-A35B          gpt-5.2
-    verify         DeepSeek-V4-Pro                gpt-5.3-codex
+    verify         DeepSeek-V3-0324               gpt-5.3-codex
 
 This module is the ONLY place that decision gets made — callers never pick
 a provider/model themselves for a routed task, they call `chat_for_task`
