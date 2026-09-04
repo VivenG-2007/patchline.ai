@@ -6,10 +6,30 @@ const installationStore = require('./githubAppInstallationStore');
 const env = require('../config/env');
 
 async function getConnection(userId) {
-  // 1. Try GitHub App installation token (preferred / default mode)
+  // 1. Try GitHub App installation token
   if (githubApp.isConfigured()) {
     try {
-      const installation = await installationStore.getInstallationForUser(userId);
+      let installation = await installationStore.getInstallationForUser(userId);
+
+      // If not linked yet in DB, auto-discover live installations from GitHub API
+      if (!installation) {
+        const liveInstallations = await githubApp.listAppInstallations();
+        if (Array.isArray(liveInstallations) && liveInstallations.length > 0) {
+          const first = liveInstallations[0];
+          await installationStore.upsertInstallation({
+            installationId: first.id,
+            accountLogin: first.account ? first.account.login : 'user',
+            accountType: first.account ? first.account.type : 'User',
+            connectedByUserId: userId,
+            repositorySelection: first.repository_selection || 'all',
+          });
+          installation = {
+            installationId: first.id,
+            accountLogin: first.account ? first.account.login : 'user',
+          };
+        }
+      }
+
       if (installation) {
         const { token } = await githubApp.getInstallationToken(installation.installationId);
         return {
@@ -20,7 +40,7 @@ async function getConnection(userId) {
         };
       }
     } catch {
-      // Fall through to OAuth connection
+      // Fall through to OAuth
     }
   }
 
@@ -36,7 +56,7 @@ async function getConnection(userId) {
   throw err;
 }
 
-async function listRepos(userId, { perPage = 30 } = {}) {
+async function listRepos(userId, { perPage = 100 } = {}) {
   const connection = await getConnection(userId);
 
   if (connection.type === 'github_app') {

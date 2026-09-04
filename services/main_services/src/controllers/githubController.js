@@ -157,7 +157,24 @@ async function oauthCallback(req, res, next) {
 async function status(req, res, next) {
   try {
     if (githubApp.isConfigured()) {
-      const appInstallation = await installationStore.getInstallationForUser(req.user.id);
+      let appInstallation = await installationStore.getInstallationForUser(req.user.id);
+      if (!appInstallation) {
+        const liveInstallations = await githubApp.listAppInstallations();
+        if (Array.isArray(liveInstallations) && liveInstallations.length > 0) {
+          const first = liveInstallations[0];
+          await installationStore.upsertInstallation({
+            installationId: first.id,
+            accountLogin: first.account ? first.account.login : 'user',
+            accountType: first.account ? first.account.type : 'User',
+            connectedByUserId: req.user.id,
+            repositorySelection: first.repository_selection || 'all',
+          });
+          appInstallation = {
+            installationId: first.id,
+            accountLogin: first.account ? first.account.login : 'user',
+          };
+        }
+      }
       if (appInstallation) {
         return res.status(200).json({
           connected: true,
