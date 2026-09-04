@@ -29,6 +29,7 @@ async function upsertInstallation({ installationId, accountLogin, accountType, c
     installation_id: Number(installationId),
     updated_at: new Date().toISOString(),
   };
+ 
   if (accountLogin) updatePayload.account_login = accountLogin;
   if (accountType) updatePayload.account_type = accountType;
   if (connectedByUserId !== undefined) updatePayload.connected_by_user_id = connectedByUserId || null;
