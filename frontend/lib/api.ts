@@ -4,14 +4,34 @@ import axios from 'axios';
 // (access_token / refresh_token) that auth-service sets. This is why CORS on
 // every backend must set credentials:true and echo the exact origin.
 export const authApi = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_AUTH_API_URL || process.env.NEXT_PUBLIC_AUTH_URL || 'http://localhost:5000',
+  baseURL:
+    process.env.NEXT_PUBLIC_AUTH_API_URL ||
+    process.env.NEXT_PUBLIC_AUTH_URL ||
+    // Production fallback — used when env vars aren't set on Vercel.
+    // Set NEXT_PUBLIC_AUTH_API_URL in Vercel dashboard to override.
+    (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+      ? 'https://patchline-auth.onrender.com'
+      : 'http://localhost:5000'),
   withCredentials: true,
 });
 
 export const mainApi = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_MAIN_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001',
+  baseURL:
+    process.env.NEXT_PUBLIC_MAIN_API_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+      ? 'https://patchline-ai-uv72.onrender.com'
+      : 'http://localhost:5001'),
   withCredentials: true,
 });
+
+// Resolve the main-service base URL at runtime (same logic as mainApi above).
+const MAIN_API_BASE =
+  process.env.NEXT_PUBLIC_MAIN_API_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+    ? 'https://patchline-ai-uv72.onrender.com'
+    : 'http://localhost:5001');
 
 // AI + file endpoints are reached THROUGH the main backend's proxy
 // (/api/proxy/...), so the browser only ever talks to two hosts: auth-service
