@@ -89,16 +89,8 @@ async function getInstallationForUser(userId) {
   if (!userId) return null;
   try {
     const { data, error } = await table().select('*').eq('connected_by_user_id', userId).order('updated_at', { ascending: false }).limit(1).maybeSingle();
-    if (error) {
-      const fallback = await table().select('*').order('updated_at', { ascending: false }).limit(1).maybeSingle();
-      if (fallback.error || !fallback.data) return null;
-      return _fromRow(fallback.data);
-    }
-    if (data) return _fromRow(data);
-
-    // If no record found with connected_by_user_id, check if there's any active installation
-    const fallback = await table().select('*').order('updated_at', { ascending: false }).limit(1).maybeSingle();
-    return (fallback.data && !fallback.error) ? _fromRow(fallback.data) : null;
+    if (error || !data) return null;
+    return _fromRow(data);
   } catch {
     return null;
   }
@@ -108,11 +100,8 @@ async function listInstallationsForUser(userId) {
   if (!userId) return [];
   try {
     const { data, error } = await table().select('*').eq('connected_by_user_id', userId).order('updated_at', { ascending: false });
-    if (error || !data || data.length === 0) {
-      const fallback = await table().select('*').order('updated_at', { ascending: false });
-      return (fallback.data || []).map(_fromRow);
-    }
-    return (data || []).map(_fromRow);
+    if (error || !data) return [];
+    return data.map(_fromRow);
   } catch {
     return [];
   }

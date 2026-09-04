@@ -35,10 +35,10 @@ import { useToast } from '@/components/ToastNotification';
 // an unrecognized stage string just falls back to the generic label below
 // rather than showing nothing.
 const FIX_STAGE_LABELS: Record<string, string> = {
-  FIX_GENERATING: 'Generating patch (GPT-5.2)',
-  CODEX_VERIFYING: 'Independent review (Codex 5.3)',
-  DETERMINISTIC_VERIFYING: 'Deterministic re-scan',
-  RISK_RECALCULATING: 'Recalculating risk',
+  FIX_GENERATING: 'Synthesizing patch on isolated branch…',
+  CODEX_VERIFYING: 'Running independent adversarial review…',
+  DETERMINISTIC_VERIFYING: 'Executing deterministic AST re-scan…',
+  RISK_RECALCULATING: 'Recalculating portfolio risk metrics…',
 };
 const MAX_FIX_ATTEMPTS = 3; // mirrors state_machine.MAX_FIX_ATTEMPTS — display only, never enforced client-side
 

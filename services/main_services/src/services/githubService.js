@@ -10,26 +10,7 @@ async function getConnection(userId) {
   // 1. Try GitHub App installation token
   if (githubApp.isConfigured()) {
     try {
-      let installation = await installationStore.getInstallationForUser(userId);
-
-      // If not linked yet in DB, auto-discover live installations from GitHub API
-      if (!installation) {
-        const liveInstallations = await githubApp.listAppInstallations();
-        if (Array.isArray(liveInstallations) && liveInstallations.length > 0) {
-          const first = liveInstallations[0];
-          await installationStore.upsertInstallation({
-            installationId: first.id,
-            accountLogin: first.account ? first.account.login : 'user',
-            accountType: first.account ? first.account.type : 'User',
-            connectedByUserId: userId,
-            repositorySelection: first.repository_selection || 'all',
-          });
-          installation = {
-            installationId: first.id,
-            accountLogin: first.account ? first.account.login : 'user',
-          };
-        }
-      }
+      const installation = await installationStore.getInstallationForUser(userId);
 
       if (installation) {
         const { token } = await githubApp.getInstallationToken(installation.installationId);

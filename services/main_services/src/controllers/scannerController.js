@@ -66,7 +66,7 @@ async function getScanStatus(req, res, next) {
       stage = await scanStore.getScanStage(scanId);
     } else if (scanRecord.fixes) {
       const inFlightFindingId = Object.keys(scanRecord.fixes).find(
-        (fId) => scanRecord.fixes[fId]?.status === 'FIX_PROCESSING'
+        (fId) => scanRecord.fixes[fId]?.status === 'FIX_PROCESSING' || scanRecord.fixes[fId]?.status === 'FIX_QUEUED'
       );
       if (inFlightFindingId) {
         stage = await scanStore.getScanStage(scanId);

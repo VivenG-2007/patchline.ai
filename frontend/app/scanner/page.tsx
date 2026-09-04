@@ -225,7 +225,11 @@ function ScannerView() {
       .status()
       .then(({ data }) => {
         setGithubConnected(data.connected ?? false);
-        if (data.connected) return githubApi.listRepos();
+        if (data.connected) {
+          return githubApi.listRepos();
+        } else {
+          setUserRepos([]);
+        }
       })
       .then((res) => {
         if (res?.data) {
@@ -235,12 +239,17 @@ function ScannerView() {
             : Array.isArray(raw?.repos)
               ? raw.repos
               : [];
-          if (list.length > 0) {
-            setUserRepos(list);
+          setUserRepos(list);
+          if (list.length > 0 && repoInput === 'octocat/secure-api') {
+            setRepoInput(list[0].fullName);
+            if (list[0].defaultBranch) setBranchInput(list[0].defaultBranch);
           }
         }
       })
-      .catch(() => setGithubConnected(false));
+      .catch(() => {
+        setGithubConnected(false);
+        setUserRepos([]);
+      });
   }, []);
 
   // Fetch live AI provider info on mount

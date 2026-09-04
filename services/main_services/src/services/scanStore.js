@@ -109,7 +109,13 @@ function stageKeyFor(scanId) {
 
 async function getScanStage(scanId) {
   try {
-    return await sharedRedis.get(stageKeyFor(scanId));
+    const stage = await sharedRedis.get(stageKeyFor(scanId));
+    if (stage) return stage;
+  } catch (err) {
+    // sharedRedis read failure — fall through to redis
+  }
+  try {
+    return await redis.get(stageKeyFor(scanId));
   } catch (err) {
     return null;
   }
