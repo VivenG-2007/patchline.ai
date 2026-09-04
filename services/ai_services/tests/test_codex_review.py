@@ -20,7 +20,17 @@ os.environ.setdefault("MONGODB_URI", "mongodb://localhost:27017")
 
 import pytest
 
+from app.config import get_settings
 from app.routers import scanner
+
+
+@pytest.fixture(autouse=True)
+def _disable_featherless():
+    settings = get_settings()
+    orig = settings.featherless_enabled
+    settings.featherless_enabled = False
+    yield
+    settings.featherless_enabled = orig
 
 
 def _finding(**overrides):

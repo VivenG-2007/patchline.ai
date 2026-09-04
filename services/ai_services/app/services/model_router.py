@@ -47,6 +47,8 @@ Design choices, and why:
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Optional
 
 from app.config import get_settings
@@ -69,6 +71,17 @@ _runtime_provider_health = {
     "fallback": {"status": "available", "last_error": None, "calls": 0, "failures": 0},
 }
 
+_featherless_circuit_open_until = 0.0
+_CIRCUIT_COOLDOWN_SECONDS = 60.0
+_featherless_sem: Optional[asyncio.Semaphore] = None
+
+
+def _get_featherless_sem() -> asyncio.Semaphore:
+    global _featherless_sem
+    if _featherless_sem is None:
+        _featherless_sem = asyncio.Semaphore(2)
+    return _featherless_sem
+
 
 class AIRouterError(Exception):
     """Both the primary (if attempted) and the fallback provider failed for
@@ -78,20 +91,24 @@ class AIRouterError(Exception):
 
 
 def _featherless_available(settings) -> bool:
-    return bool(settings.featherless_enabled and settings.featherless_api_key)
+    return bool(
+        settings.featherless_enabled
+        and settings.featherless_api_key
+        and time.monotonic() >= _featherless_circuit_open_until
+    )
 
 
 def get_provider_runtime_status() -> dict:
     """Returns dynamic backend health and runtime provider information for the UI."""
     settings = get_settings()
-    is_f_configured = _featherless_available(settings)
+    is_f_configured = bool(settings.featherless_enabled and settings.featherless_api_key)
     f_health = _runtime_provider_health["featherless"]
     fb_health = _runtime_provider_health["fallback"]
 
     # Determine status of Featherless AI
     if not is_f_configured:
         f_status = "disabled"
-    elif f_health["status"] == "failed":
+    elif f_health["status"] == "failed" or time.monotonic() < _featherless_circuit_open_until:
         f_status = "failed"
     elif f_health["calls"] > 0 and f_health["status"] == "working":
         f_status = "working"
@@ -171,6 +188,7 @@ async def chat_for_task(
     Returns the provider's normal {content, usage} dict plus `provider` and
     `model`, so every call site can log exactly which model answered.
     """
+    global _featherless_circuit_open_until
     settings = get_settings()
     ctx = log_context or {}
 
@@ -182,7 +200,10 @@ async def chat_for_task(
         model = _FEATHERLESS_MODEL_BY_TASK[task](settings)
         try:
             featherless = get_provider_by_name("featherless")
-            result = await featherless.chat(messages, model=model)
+            timeout = min(float(settings.featherless_timeout_seconds or 30), 30.0)
+            async with _get_featherless_sem():
+                result = await asyncio.wait_for(featherless.chat(messages, model=model), timeout=timeout)
+            _featherless_circuit_open_until = 0.0
             _runtime_provider_health["featherless"]["status"] = "working"
             _runtime_provider_health["featherless"]["last_error"] = None
             _runtime_provider_health["featherless"]["calls"] += 1
@@ -190,12 +211,13 @@ async def chat_for_task(
             return {**result, "provider": "featherless", "model": model}
         except Exception as exc:  # noqa: BLE001 — provider failure, not a bug; falling back deliberately
             used_fallback = True
+            _featherless_circuit_open_until = time.monotonic() + _CIRCUIT_COOLDOWN_SECONDS
             _runtime_provider_health["featherless"]["status"] = "failed"
             _runtime_provider_health["featherless"]["last_error"] = str(exc)
             _runtime_provider_health["featherless"]["failures"] += 1
             logger.warning(
                 "ai_router_primary_failed_falling_back",
-                task=task, provider="featherless", model=model, error=str(exc), **ctx,
+                task=task, provider="featherless", model=model, error=str(exc), circuit_cooldown_s=_CIRCUIT_COOLDOWN_SECONDS, **ctx,
             )
 
     if fallback_provider is None or not fallback_model:
@@ -205,7 +227,7 @@ async def chat_for_task(
         )
 
     try:
-        result = await fallback_provider.chat(messages, model=fallback_model)
+        result = await asyncio.wait_for(fallback_provider.chat(messages, model=fallback_model), timeout=35.0)
         _runtime_provider_health["fallback"]["status"] = "working"
         _runtime_provider_health["fallback"]["last_error"] = None
         _runtime_provider_health["fallback"]["calls"] += 1

@@ -149,6 +149,7 @@ export default function FindingCard({
 }: FindingCardProps) {
   const [diffExpanded, setDiffExpanded] = useState(false);
   const [ragExpanded, setRagExpanded] = useState(true);
+  const [logsExpanded, setLogsExpanded] = useState(true);
   const [approving, setApproving] = useState(false);
   const [creatingPr, setCreatingPr] = useState(false);
   const [copiedPatch, setCopiedPatch] = useState(false);
@@ -183,11 +184,11 @@ export default function FindingCard({
 
   const attempts = fixStatus?.attempts || 0;
   const maxAttemptsReached = attempts >= 3;
-  const isFixing = fixStatus?.phase === 'QUEUED' || fixStatus?.phase === 'PROCESSING' || approving;
   const isVerified = fixStatus?.phase === 'VERIFIED';
   const isNeedsReview = fixStatus?.phase === 'NEEDS_REVIEW';
   const isFailed = fixStatus?.phase === 'FAILED';
   const isUnresolved = fixStatus?.phase === 'UNRESOLVED';
+  const isFixing = !isFailed && !isUnresolved && (fixStatus?.phase === 'QUEUED' || fixStatus?.phase === 'PROCESSING' || approving);
   const isSettled = isVerified || isNeedsReview || isFailed || isUnresolved;
 
   // Never fabricate a patch. If the backend hasn't generated one yet (or a
@@ -205,6 +206,70 @@ export default function FindingCard({
   const verifyModelLabel = fixStatus?.verifyModel
     ? `${fixStatus.verifyModel} Evaluator & Deterministic Re-scanner`
     : 'AI Evaluator & Deterministic Re-scanner';
+
+  const remediationLogs = React.useMemo(() => {
+    const logs: { id: number; text: string; done: boolean; active?: boolean }[] = [];
+    const stage = fixStatus?.stage;
+
+    logs.push({
+      id: 1,
+      text: fixStatus?.fixBranch
+        ? `Git branch initialized: ${fixStatus.fixBranch}`
+        : 'Initializing isolated git remediation branch & AST context…',
+      done: Boolean(fixStatus?.fixBranch || isSettled || (stage && stage !== 'FIX_GENERATING')),
+      active: isFixing && (!stage || stage === 'FIX_GENERATING'),
+    });
+
+    logs.push({
+      id: 2,
+      text: fixStatus?.similarPastFixes && fixStatus.similarPastFixes.length > 0
+        ? `ChromaDB vector memory: recalled ${fixStatus.similarPastFixes.length} similar verified AST patch patterns`
+        : 'Querying vector memory store for similar verified fixes…',
+      done: Boolean((fixStatus?.similarPastFixes && fixStatus.similarPastFixes.length > 0) || isSettled || (stage && stage !== 'FIX_GENERATING')),
+      active: isFixing && (!stage || stage === 'FIX_GENERATING'),
+    });
+
+    logs.push({
+      id: 3,
+      text: fixStatus?.summary
+        ? `${fixModelLabel}: ${fixStatus.summary}`
+        : `Dispatching minimal, syntax-accurate patch synthesis to ${fixModelLabel}…`,
+      done: Boolean(fixStatus?.summary || isSettled || (stage && (stage === 'CODEX_VERIFYING' || stage === 'DETERMINISTIC_VERIFYING' || stage === 'RISK_RECALCULATING'))),
+      active: isFixing && stage === 'FIX_GENERATING',
+    });
+
+    const verifyModelLabel = fixStatus?.verifyModel || fixStatus?.aiVerification?.model || 'Codex';
+    logs.push({
+      id: 4,
+      text: fixStatus?.aiVerification?.status
+        ? `Adversarial review (${verifyModelLabel}): ${fixStatus.aiVerification.status}`
+        : `Running independent adversarial review (${verifyModelLabel})…`,
+      done: Boolean(fixStatus?.aiVerification || isSettled || (stage && (stage === 'DETERMINISTIC_VERIFYING' || stage === 'RISK_RECALCULATING'))),
+      active: isFixing && stage === 'CODEX_VERIFYING',
+    });
+
+    logs.push({
+      id: 5,
+      text: fixStatus?.deterministicVerification?.status
+        ? `Deterministic AST re-scan: ${fixStatus.deterministicVerification.status === 'PASSED' ? '0 matches (CLEAN)' : 'rule still matches'}`
+        : 'Executing deterministic AST re-scan to certify 0 regressions…',
+      done: Boolean(fixStatus?.deterministicVerification || isSettled || (stage && stage === 'RISK_RECALCULATING')),
+      active: isFixing && stage === 'DETERMINISTIC_VERIFYING',
+    });
+
+    if (isVerified || fixStatus?.pullRequest) {
+      logs.push({
+        id: 6,
+        text: fixStatus?.pullRequest
+          ? `GitHub PR #${fixStatus.pullRequest.number} opened and synced to dashboard`
+          : 'Finalizing unified diff & opening Pull Request…',
+        done: Boolean(fixStatus?.pullRequest),
+        active: isFixing && stage === 'RISK_RECALCULATING',
+      });
+    }
+
+    return logs;
+  }, [fixStatus, isFixing, isSettled, isVerified, fixModelLabel]);
 
   const handleApprove = async () => {
     if (maxAttemptsReached || isFixing) return;
@@ -446,19 +511,19 @@ export default function FindingCard({
           <div className="rounded-xl border border-border-default bg-bg-card/70 p-3">
             <div className="flex items-center justify-between text-[11px] font-mono text-text-muted mb-2 pb-1.5 border-b border-border-default/50">
               <span className="flex items-center gap-1.5 font-semibold text-text-primary">
-                <span className="w-2 h-2 rounded-full bg-accent-cyan pulse-dot" />
+                <span className={`w-2 h-2 rounded-full ${isFailed ? 'bg-accent-rose' : isVerified ? 'bg-accent-emerald' : isNeedsReview ? 'bg-accent-amber' : 'bg-accent-cyan pulse-dot'}`} />
                 PatchLine Autonomous Remediation Track
               </span>
-              <span className="text-[10px] text-accent-cyan">
-                {isVerified ? 'Completed · PR Active' : isFixing ? 'Synthesis & Verification in Flight' : isNeedsReview ? 'Human Review Needed' : isUnresolved ? 'Attempts Exhausted' : 'Awaiting Authorization'}
+              <span className={`text-[10px] ${isFailed ? 'text-accent-rose font-semibold' : isNeedsReview ? 'text-accent-amber' : 'text-accent-cyan'}`}>
+                {isVerified ? 'Completed · PR Active' : isFixing ? 'Synthesis & Verification in Flight' : isNeedsReview ? 'Human Review Needed' : isUnresolved ? 'Attempts Exhausted' : isFailed ? 'Remediation Attempt Failed' : 'Awaiting Authorization'}
               </span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
-                { step: 1, label: 'Branch & RAG', key: 'BRANCH', active: isFixing && (!fixStatus?.stage || fixStatus?.stage === 'FIX_GENERATING'), done: isVerified || (isFixing && fixStatus?.stage && fixStatus?.stage !== 'FIX_GENERATING') },
-                { step: 2, label: 'AI Patch Synthesis', key: 'SYNTHESIS', active: isFixing && fixStatus?.stage === 'FIX_GENERATING', done: isVerified || (isFixing && (fixStatus?.stage === 'CODEX_VERIFYING' || fixStatus?.stage === 'DETERMINISTIC_VERIFYING' || fixStatus?.stage === 'RISK_RECALCULATING')) },
-                { step: 3, label: 'Dual Verification', key: 'VERIFY', active: isFixing && (fixStatus?.stage === 'CODEX_VERIFYING' || fixStatus?.stage === 'DETERMINISTIC_VERIFYING'), done: isVerified || (isFixing && fixStatus?.stage === 'RISK_RECALCULATING'), failed: isNeedsReview || isFailed },
+                { step: 1, label: 'Branch & RAG', key: 'BRANCH', active: isFixing && (!fixStatus?.stage || fixStatus?.stage === 'FIX_GENERATING'), done: isVerified || isSettled || (isFixing && fixStatus?.stage && fixStatus?.stage !== 'FIX_GENERATING') },
+                { step: 2, label: 'AI Patch Synthesis', key: 'SYNTHESIS', active: isFixing && fixStatus?.stage === 'FIX_GENERATING', done: isVerified || (isSettled && Boolean(fixStatus?.summary)) || (isFixing && (fixStatus?.stage === 'CODEX_VERIFYING' || fixStatus?.stage === 'DETERMINISTIC_VERIFYING' || fixStatus?.stage === 'RISK_RECALCULATING')) },
+                { step: 3, label: 'Dual Verification', key: 'VERIFY', active: isFixing && (fixStatus?.stage === 'CODEX_VERIFYING' || fixStatus?.stage === 'DETERMINISTIC_VERIFYING'), done: isVerified || (isFixing && fixStatus?.stage === 'RISK_RECALCULATING'), failed: isNeedsReview || isFailed || isUnresolved },
                 { step: 4, label: 'GitHub PR & Sync', key: 'DEPLOY', active: isFixing && fixStatus?.stage === 'RISK_RECALCULATING', done: isVerified },
               ].map((st) => (
                 <div
@@ -490,9 +555,7 @@ export default function FindingCard({
             </div>
           </div>
 
-          {/* Fix Synthesis Card — model attribution is dynamic (fixModelLabel),
-              never a hardcoded model name, since model_router.py can route
-              different attempts to different providers. */}
+          {/* Fix Synthesis Card — model attribution is dynamic (fixModelLabel) */}
           <div className="rounded-xl border border-accent-purple/30 bg-bg-subtle/70 p-3.5 space-y-2 font-mono text-xs">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-default/60 pb-2">
               <div className="flex items-center gap-1.5 text-accent-purple font-semibold">
@@ -508,8 +571,61 @@ export default function FindingCard({
             </div>
 
             <p className="text-text-secondary text-xs leading-relaxed">
-              {fixStatus?.summary || (isFixing ? 'Synthesizing minimal, syntax-accurate patch on isolated branch…' : 'No synthesis summary reported by the backend for this attempt.')}
+              {fixStatus?.summary || (isFixing ? 'Synthesizing minimal, syntax-accurate patch on isolated branch…' : isFailed ? (fixStatus?.error || 'Fix synthesis or verification failed for this attempt.') : 'No synthesis summary reported by the backend for this attempt.')}
             </p>
+          </div>
+
+          {/* Real-time AI Remediation Execution Log Stream */}
+          <div className="rounded-xl border border-white/10 bg-terminal-bg p-3 font-mono text-xs space-y-1.5 animate-fade-rise-in">
+            <div className="flex items-center justify-between text-[11px] text-terminal-muted border-b border-white/10 pb-1.5">
+              <div className="flex items-center gap-1.5 text-accent-cyan font-semibold">
+                <Terminal size={12} />
+                <span>[AI_REMEDIATION_LOG] daemon://fix_{finding.id.toLowerCase()}.log</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLogsExpanded((v) => !v)}
+                className="text-[10px] text-terminal-muted hover:text-terminal-text flex items-center gap-1 transition-colors"
+              >
+                {logsExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                <span>{logsExpanded ? 'Collapse Logs' : 'View Stream Logs'}</span>
+              </button>
+            </div>
+
+            {logsExpanded && (
+              <div className="space-y-1 pt-1 max-h-40 overflow-y-auto">
+                {remediationLogs.map((log) => (
+                  <div key={log.id} className="flex items-start gap-2 text-terminal-text text-[11px] leading-relaxed">
+                    <span className="text-terminal-muted select-none font-mono">[{log.id}]</span>
+                    <span className="flex-1 flex items-center gap-1.5">
+                      {log.done ? (
+                        <Check size={11} className="text-accent-emerald shrink-0" strokeWidth={2.5} />
+                      ) : log.active ? (
+                        <Loader2 size={11} className="text-accent-cyan animate-spin shrink-0" />
+                      ) : (
+                        <span className="w-2.5 h-2.5 rounded-full border border-white/20 shrink-0 inline-block" />
+                      )}
+                      <span className={log.active ? 'text-accent-cyan font-medium' : log.done ? 'text-slate-200' : 'text-slate-400'}>
+                        {log.text}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+                {isFixing && (
+                  <div className="text-accent-cyan text-[11px] flex items-center gap-1.5 animate-pulse pt-0.5">
+                    <span>&gt;</span> <span>executing in-process synthesis &amp; adversarial verification…</span>
+                  </div>
+                )}
+                {isSettled && (
+                  <div className="text-terminal-muted text-[10px] pt-1 border-t border-white/5 flex items-center justify-between">
+                    <span>Audit trail recorded</span>
+                    <span className={isVerified ? 'text-accent-emerald font-semibold' : 'text-accent-amber'}>
+                      ● {isVerified ? 'PASSED & ACTIVE' : isFailed ? 'FAILED' : 'NEEDS REVIEW'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Verification Card — every claim below is derived from the

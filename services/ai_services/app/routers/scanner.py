@@ -919,7 +919,8 @@ async def _enrich_deterministic_findings(
     settings = get_settings()
     provider = get_provider()
     model = _scan_model(settings)
-    sem = asyncio.Semaphore(6)
+    # Bounded concurrency so we don't slam AI providers or trigger rate limits
+    sem = asyncio.Semaphore(2)
 
     # file path -> content, so a finding backed by multiple engines can also
     # be given the specific AST node Tree-sitter resolved at its line (see
@@ -953,24 +954,30 @@ async def _enrich_deterministic_findings(
             user_prompt = "\n".join(prompt_parts)
 
             description, suggested_fix = rf["description"], rf["suggestedFix"]
+            print(f"[AI_ANALYSIS] Enriching {rf.get('id', 'finding')} ({rf.get('file')}:{rf.get('line')}) via AI router...", flush=True)
             try:
-                result = await model_router.chat_for_task(
-                    "analysis",
-                    [
-                        {"role": "system", "content": _EXPLAIN_SYSTEM_PROMPT},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    fallback_provider=provider,
-                    fallback_model=model,
-                    log_context={"repo": repo_full, "file": rf.get("file")},
+                result = await asyncio.wait_for(
+                    model_router.chat_for_task(
+                        "analysis",
+                        [
+                            {"role": "system", "content": _EXPLAIN_SYSTEM_PROMPT},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        fallback_provider=provider,
+                        fallback_model=model,
+                        log_context={"repo": repo_full, "file": rf.get("file")},
+                    ),
+                    timeout=20.0,
                 )
                 parsed = _parse_json_object(result.get("content") or "")
                 description = parsed.get("description") or description
                 suggested_fix = parsed.get("suggestedFix") or suggested_fix
+                print(f"[AI_ANALYSIS] Attached AI explanation & fix for {rf.get('id', 'finding')}", flush=True)
             except Exception as exc:
                 # Deterministic finding stands on its own generic text — this is
                 # an enrichment failure, not a scan failure.
                 logger.warning("ai_explain_failed_using_generic_text", finding_id=rf.get("id"), error=str(exc))
+                print(f"[AI_ANALYSIS] Retained baseline deterministic remediation for {rf.get('id', 'finding')} ({exc})", flush=True)
 
             return Finding(
                 id=rf["id"],
@@ -1087,9 +1094,7 @@ def _select_batches(batches: list[list[dict]], max_batches: Optional[int]) -> li
     return [batches[i] for i in indices]
 
 
-_AI_BATCH_CONCURRENCY = 4  # parallel AI-provider calls in-flight at once, mirrors
-# _FETCH_CONCURRENCY's pattern above — bounded so a large repo's batches don't
-# all fire at once and trip the AI provider's own rate limits.
+_AI_BATCH_CONCURRENCY = 2  # parallel AI-provider calls in-flight at once, bounded to avoid rate/concurrency limits
 
 
 # The supplemental prompt already tells the model not to re-report a
@@ -1242,18 +1247,24 @@ async def _ai_supplemental_scan(
             {"role": "user", "content": f"Repository: {repo_full}\n\n{code_context}"},
         ]
         async with sem:
+            print(f"[AI_ANALYSIS] Running supplemental AI security review batch ({len(batch)} files)...", flush=True)
             try:
-                result = await model_router.chat_for_task(
-                    "analysis", messages, fallback_provider=provider, fallback_model=model,
-                    log_context={"repo": repo_full},
+                result = await asyncio.wait_for(
+                    model_router.chat_for_task(
+                        "analysis", messages, fallback_provider=provider, fallback_model=model,
+                        log_context={"repo": repo_full},
+                    ),
+                    timeout=30.0,
                 )
             except Exception as exc:
                 logger.warning("ai_supplemental_batch_failed", repo=repo_full, model=model, error=str(exc))
+                print(f"[AI_ANALYSIS] Supplemental analysis batch skipped ({exc})", flush=True)
                 return [], batch_content_by_path
 
         raw = (result.get("content") or "").strip()
         try:
             items = json.loads(_strip_code_fences(raw)) or []
+            print(f"[AI_ANALYSIS] Batch complete -> {len(items)} supplemental finding(s) candidate", flush=True)
         except json.JSONDecodeError as exc:
             logger.warning("ai_supplemental_json_parse_failed", repo=repo_full, error=str(exc), raw=raw[:300])
             return [], batch_content_by_path
@@ -1455,15 +1466,19 @@ async def _run_scan_pipeline(payload: ScanRequest, user: CurrentUser, scan_id: s
     # ── Step 2: deterministic pattern-based scan (primary source) — runs
     # over the full file set in FULL mode, or just the pushed files in
     # INCREMENTAL mode ──
+    await scan_progress.report_stage(scan_id, "DETERMINISTIC_SCAN")
     raw_deterministic = scan_repo_files(files)
     logger.info("deterministic_scan_complete", scan_id=scan_id, repo=repo_full, count=len(raw_deterministic))
     print(f"[DETERMINISTIC_SCAN] Execution finished: {len(raw_deterministic)} rule matches identified", flush=True)
-    await scan_progress.report_stage(scan_id, "DETERMINISTIC_SCAN")
 
     # ── Step 3: AI explains/enriches each deterministic finding ──
+    await scan_progress.report_stage(scan_id, "AI_ANALYSIS")
+    print(f"[AI_ANALYSIS] Connecting to AI Model Router and initiating contextual enrichment...", flush=True)
     deterministic_findings = await _enrich_deterministic_findings(raw_deterministic, repo_full, files)
+    print(f"[AI_ANALYSIS] Completed contextual enrichment ({len(deterministic_findings)} findings analyzed)", flush=True)
 
     # ── Step 4: AI supplemental scan ──
+    print(f"[AI_ANALYSIS] Dispatching supplemental deep security scan across repository files...", flush=True)
     ai_analysis_note: Optional[str] = None
     if incremental:
         ai_findings = await _ai_supplemental_scan(files, repo_full, deterministic_findings) if files else []
@@ -1486,8 +1501,10 @@ async def _run_scan_pipeline(payload: ScanRequest, user: CurrentUser, scan_id: s
             "All findings below are from the deterministic scanner."
         )
 
+    print(f"[AI_ANALYSIS] Supplemental analysis complete ({len(ai_findings)} additional zero-day/logic issues identified)", flush=True)
+    print(f"[AI_ANALYSIS] AI analysis pass complete — {len(deterministic_findings) + len(ai_findings)} findings handed to Risk Engine", flush=True)
+
     rescanned_findings = deterministic_findings + ai_findings
-    await scan_progress.report_stage(scan_id, "AI_ANALYSIS")
 
     # ── Step (incremental only): verify previous findings — a finding from
     # the previous scan, on one of the pushed files, that no longer shows up
@@ -1539,6 +1556,7 @@ async def _run_scan_pipeline(payload: ScanRequest, user: CurrentUser, scan_id: s
         var=risk_overview["var"]["value"],
     )
     await scan_progress.report_stage(scan_id, "RISK_ENGINE")
+    print(f"[RISK_ENGINE] Deterministic scoring, EAL and VaR calculation attached", flush=True)
 
     # Build report payload for Blob Storage
     report_payload = {

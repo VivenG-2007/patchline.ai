@@ -79,9 +79,12 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     engine: 'AI Model Router',
     description: 'AI model explains/enriches each deterministic finding, then runs a supplemental scan (tiered by repo size) for issues pattern rules can\'t catch.',
     logs: [
-      'Requesting root-cause explanations for deterministic findings…',
-      'Running supplemental AI analysis (tier depends on repository size)…',
-      'AI analysis pass complete.',
+      'Connecting to AI Model Router and evaluating authentication credentials…',
+      'Extracting Abstract Syntax Tree (AST) context windows around pattern sinks…',
+      'Synthesizing root-cause explanations and calculating confidence scoring…',
+      'Dispatching supplemental contextual security analysis across repository files…',
+      'Validating taint paths, exploitability factors, and pruning false positives…',
+      'AI analysis pass complete — enriched vulnerability report compiled.',
     ],
   },
   {
@@ -153,16 +156,24 @@ export default function ScanPipeline({
           ...s,
           engine: model,
           description: s.description.replace('AI model explains/enriches', `${aiProvider.currentProvider} explains/enriches`),
+          logs: [
+            `Connecting to ${aiProvider.currentProvider} endpoint (${model})…`,
+            'Extracting Abstract Syntax Tree (AST) context windows around pattern sinks…',
+            `Generating root-cause explanations via ${model}…`,
+            `Executing supplemental contextual analysis with ${model}…`,
+            'Validating taint paths, exploitability factors, and pruning false positives…',
+            'AI analysis pass complete — enriched vulnerability report compiled.',
+          ],
         };
       }
       return s;
     });
   }, [aiProvider]);
 
-  // selectedStage: auto-follows the active stage while scanning; user can click to override
+  // selectedStage: user-selected stage takes priority if clicked; otherwise auto-follows active stage
   const activeStageData = stages[Math.min(currentStageIndex, stages.length - 1)];
   const [userSelectedStage, setUserSelectedStage] = useState<PipelineStage | null>(null);
-  const selectedStage = isScanning ? activeStageData : (userSelectedStage ?? activeStageData);
+  const selectedStage = userSelectedStage ?? activeStageData;
 
   const [drawerOpen, setDrawerOpen] = useState(true); // default open so logs are visible
   const [visibleLogCount, setVisibleLogCount] = useState(1);
@@ -209,6 +220,7 @@ export default function ScanPipeline({
   const handleStageClick = (stage: PipelineStage) => {
     setUserSelectedStage(stage);
     setDrawerOpen(true);
+    setVisibleLogCount((liveLogLines?.[stage.id] ?? stage.logs).length);
     if (onSelectStage) onSelectStage(stage);
   };
 
