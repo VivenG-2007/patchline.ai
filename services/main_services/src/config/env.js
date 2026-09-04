@@ -13,7 +13,10 @@ const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT) || 5001,
   serviceName: process.env.SERVICE_NAME || 'main-service',
-  corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3000').split(',').map((s) => s.trim()).filter(Boolean),
+  corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3000')
+    .split(',')
+    .map((s) => s.trim().replace(/\/+$/, ''))
+    .filter(Boolean),
 
   jwt: {
     publicKey: decodeKey(process.env.JWT_PUBLIC_KEY_BASE64),

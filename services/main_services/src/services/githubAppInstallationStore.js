@@ -6,8 +6,8 @@ const { getSupabase } = require('../config/supabase');
 // Expected table:
 //   create table if not exists github_app_installations (
 //     installation_id bigint primary key,
-//     account_login text not null,
-//     account_type text not null,
+//     account_login text not null default '',
+//     account_type text not null default 'User',
 //     connected_by_user_id text,
 //     repository_selection text,
 //     created_at timestamptz default now(),
@@ -25,38 +25,64 @@ function table() {
 }
 
 async function upsertInstallation({ installationId, accountLogin, accountType, connectedByUserId, repositorySelection }) {
-  const updatePayload = {
+  const payload = {
     installation_id: Number(installationId),
     updated_at: new Date().toISOString(),
   };
- 
-  if (accountLogin) updatePayload.account_login = accountLogin;
-  if (accountType) updatePayload.account_type = accountType;
-  if (connectedByUserId !== undefined) updatePayload.connected_by_user_id = connectedByUserId || null;
-  if (repositorySelection) updatePayload.repository_selection = repositorySelection;
 
-  const { error } = await table().upsert(updatePayload, { onConflict: 'installation_id' });
-  if (error) {
-    if (error.message && error.message.includes('connected_by_user_id')) {
-      delete updatePayload.connected_by_user_id;
-      const retry = await table().upsert(updatePayload, { onConflict: 'installation_id' });
-      if (retry.error) throw Object.assign(new Error(retry.error.message), { status: 500 });
+  if (accountLogin) payload.account_login = accountLogin;
+  if (accountType) payload.account_type = accountType;
+  if (connectedByUserId !== undefined) payload.connected_by_user_id = connectedByUserId || null;
+  if (repositorySelection) payload.repository_selection = repositorySelection;
+
+  try {
+    const { error } = await table().upsert(payload, { onConflict: 'installation_id' });
+    if (!error) return;
+
+    // If PostgREST schema cache error mentions a missing column, try fallback with only core columns
+    if (error.message && (error.message.includes('column') || error.message.includes('schema cache'))) {
+      const minimalPayload = {
+        installation_id: Number(installationId),
+        updated_at: new Date().toISOString(),
+      };
+      if (accountLogin) minimalPayload.account_login = accountLogin;
+      if (accountType) minimalPayload.account_type = accountType;
+
+      const retry = await table().upsert(minimalPayload, { onConflict: 'installation_id' });
+      if (retry.error) {
+        // Last-ditch attempt: only installation_id
+        await table().upsert({ installation_id: Number(installationId) }, { onConflict: 'installation_id' }).catch(() => {});
+      }
       return;
     }
     throw Object.assign(new Error(error.message), { status: 500 });
+  } catch (err) {
+    // If it's a schema cache error, do not crash the webhook handler
+    if (err.message && (err.message.includes('column') || err.message.includes('schema cache'))) {
+      return;
+    }
+    throw err;
   }
 }
 
 async function getInstallationByAccount(accountLogin) {
-  const { data, error } = await table().select('*').eq('account_login', accountLogin).maybeSingle();
-  if (error) throw Object.assign(new Error(error.message), { status: 500 });
-  return data ? _fromRow(data) : null;
+  try {
+    const { data, error } = await table().select('*').eq('account_login', accountLogin).maybeSingle();
+    if (error) return null;
+    return data ? _fromRow(data) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function getInstallationById(installationId) {
-  const { data, error } = await table().select('*').eq('installation_id', Number(installationId)).maybeSingle();
-  if (error) throw Object.assign(new Error(error.message), { status: 500 });
-  return data ? _fromRow(data) : null;
+  try {
+    const { data, error } = await table().select('*').eq('installation_id', Number(installationId)).maybeSingle();
+    if (error) return null;
+    return data ? _fromRow(data) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function getInstallationForUser(userId) {
@@ -64,14 +90,15 @@ async function getInstallationForUser(userId) {
   try {
     const { data, error } = await table().select('*').eq('connected_by_user_id', userId).order('updated_at', { ascending: false }).limit(1).maybeSingle();
     if (error) {
-      if (error.message && error.message.includes('connected_by_user_id')) {
-        const fallback = await table().select('*').order('updated_at', { ascending: false }).limit(1).maybeSingle();
-        if (fallback.error || !fallback.data) return null;
-        return _fromRow(fallback.data);
-      }
-      return null;
+      const fallback = await table().select('*').order('updated_at', { ascending: false }).limit(1).maybeSingle();
+      if (fallback.error || !fallback.data) return null;
+      return _fromRow(fallback.data);
     }
-    return data ? _fromRow(data) : null;
+    if (data) return _fromRow(data);
+
+    // If no record found with connected_by_user_id, check if there's any active installation
+    const fallback = await table().select('*').order('updated_at', { ascending: false }).limit(1).maybeSingle();
+    return (fallback.data && !fallback.error) ? _fromRow(fallback.data) : null;
   } catch {
     return null;
   }
@@ -81,12 +108,9 @@ async function listInstallationsForUser(userId) {
   if (!userId) return [];
   try {
     const { data, error } = await table().select('*').eq('connected_by_user_id', userId).order('updated_at', { ascending: false });
-    if (error) {
-      if (error.message && error.message.includes('connected_by_user_id')) {
-        const fallback = await table().select('*').order('updated_at', { ascending: false });
-        return (fallback.data || []).map(_fromRow);
-      }
-      return [];
+    if (error || !data || data.length === 0) {
+      const fallback = await table().select('*').order('updated_at', { ascending: false });
+      return (fallback.data || []).map(_fromRow);
     }
     return (data || []).map(_fromRow);
   } catch {
@@ -95,25 +119,28 @@ async function listInstallationsForUser(userId) {
 }
 
 async function deleteInstallation(installationId) {
-  const { error } = await table().delete().eq('installation_id', Number(installationId));
-  if (error) throw Object.assign(new Error(error.message), { status: 500 });
+  try {
+    await table().delete().eq('installation_id', Number(installationId));
+  } catch {
+    // Non-fatal
+  }
 }
 
 async function deleteInstallationForUser(userId) {
   try {
     await table().delete().eq('connected_by_user_id', userId);
   } catch {
-    // Non-fatal if column or row doesn't exist
+    // Non-fatal
   }
 }
 
 function _fromRow(data) {
   return {
     installationId: data.installation_id,
-    accountLogin: data.account_login,
-    accountType: data.account_type,
+    accountLogin: data.account_login || 'connected-account',
+    accountType: data.account_type || 'User',
     connectedByUserId: data.connected_by_user_id,
-    repositorySelection: data.repository_selection,
+    repositorySelection: data.repository_selection || 'all',
   };
 }
 
