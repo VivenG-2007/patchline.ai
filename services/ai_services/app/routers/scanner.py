@@ -1505,7 +1505,7 @@ async def _run_scan_pipeline(payload: ScanRequest, user: CurrentUser, scan_id: s
 
 
 @router.post("/generate-and-verify-fix", response_model=FixResponse)
-async def generate_and_verify_fix(payload: FixRequest, user: CurrentUser = Depends(require_auth)):
+async def generate_and_verify_fix(payload: FixRequest, user: CurrentUser = Depends(require_auth_optional)):
     """
     1. Look up the specific finding from the persisted scan (MongoDB scan_history)
     2. Fetch that file's current content + blob sha from GitHub
@@ -1955,7 +1955,7 @@ async def generate_and_verify_fix(payload: FixRequest, user: CurrentUser = Depen
 
 
 @router.get("/history")
-async def get_scan_history(limit: int = 20, user: CurrentUser = Depends(require_auth)):
+async def get_scan_history(limit: int = 20, user: CurrentUser = Depends(require_auth_optional)):
     """
     Return list of past scans from MongoDB scan_history collection,
     newest first. Each record includes the Azure Blob URI for the full report.

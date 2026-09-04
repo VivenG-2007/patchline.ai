@@ -251,6 +251,7 @@ async function processFixJob(job) {
         head: fixResult.fixBranch,
         base: branch,
       });
+      logger.info({ prNumber: pr?.number, prUrl: pr?.url, scanId, findingId }, 'GitHub pull request successfully opened for verified fix');
     } catch (prErr) {
       logger.error({ prErr, scanId, findingId }, 'Failed to create GitHub PR');
     }
