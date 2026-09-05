@@ -232,7 +232,7 @@ function ScannerView() {
   // coarse `status` field (QUEUED/PROCESSING/terminal — see STATUS_TO_STAGE)
   // or (b) the real, backend-confirmed `stage` field ai-storage-service
   // writes as it actually completes each pipeline step (see STAGE_TO_INDEX
-  // and services/ai_sevices/app/services/scan_progress.py). There is no
+  // and services/ai_services/app/services/scan_progress.py). There is no
   // client-side timer pretending to be progress anymore — a scan on a large
   // repo genuinely spends most of its time in one real stage (e.g. AI
   // Analysis), and the UI now reflects that honestly instead of sailing

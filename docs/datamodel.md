@@ -3,7 +3,7 @@
 Authoritative reference for the shapes of data that move through the scan → fix
 pipeline. This describes the actual objects produced/consumed by `main-service`
 (Node/Express, `services/main`) and `ai-storage-service` (Python/FastAPI,
-`services/ai_sevices`), not an idealized schema — field names below match the
+`services/ai_services`), not an idealized schema — field names below match the
 JSON on the wire.
 
 ## 1. Scan Record (`scan:record:{scanId}`)
@@ -48,7 +48,7 @@ means "no checkpoint newer than 15 minutes," never an error.
 ## 2. Finding
 
 A finding is either **deterministic** (produced by the Semgrep/Tree-sitter/
-regex engines, `services/ai_sevices/app/services/deterministic_scanner.py`)
+regex engines, `services/ai_services/app/services/deterministic_scanner.py`)
 or **AI** (produced by the GPT-4.1-mini supplementary pass). Both shapes are
 normalized onto the same envelope before they ever leave the scanner:
 

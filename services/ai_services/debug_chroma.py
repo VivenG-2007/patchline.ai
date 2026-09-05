@@ -1,7 +1,7 @@
 """
 ChromaDB + Embedding pipeline diagnostic script.
 
-Run from services/ai_sevices:
+Run from services/ai_services:
     python debug_chroma.py
 
 Tests each step independently so you can see exactly where the failure is.

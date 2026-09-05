@@ -21,7 +21,7 @@ What this does
 
 Usage
 -----
-  Run from the services/ai_sevices/ directory with a correctly populated .env:
+  Run from the services/ai_services/ directory with a correctly populated .env:
 
       python backfill_chroma_fixes.py [--dry-run]
 
