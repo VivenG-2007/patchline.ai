@@ -95,10 +95,10 @@ If creating services manually in the Render UI:
   - `JWT_PUBLIC_KEY_BASE64`: `<base64-encoded-rs256-public-key>`
   - `CORS_ORIGINS`: `https://hackwave-frontend.onrender.com`
 
-#### 2. Main Service (`services/main`)
+#### 2. Main Service (`services/main_services`)
 - **Service Type:** Web Service
 - **Environment:** Node
-- **Root Directory:** `services/main`
+- **Root Directory:** `services/main_services`
 - **Build Command:** `npm install`
 - **Start Command:** `npm start`
 - **Health Check Path:** `/health`
@@ -111,10 +111,10 @@ If creating services manually in the Render UI:
   - `AUTH_SERVICE_URL`: `https://hackwave-auth-service.onrender.com`
   - `AI_SERVICE_URL`: `https://hackwave-ai-service.onrender.com`
 
-#### 3. AI Scanning Service (`services/ai-service`)
+#### 3. AI Scanning Service (`services/ai_services`)
 - **Service Type:** Web Service
 - **Environment:** Python 3 (or Docker)
-- **Root Directory:** `services/ai-service`
+- **Root Directory:** `services/ai_services`
 - **Build Command:** `pip install -r requirements.txt`
 - **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
 - **Health Check Path:** `/docs`

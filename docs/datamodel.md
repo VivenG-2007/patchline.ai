@@ -11,7 +11,7 @@ JSON on the wire.
 The scan record is the single mutable document that represents one scan from
 `QUEUED` through `COMPLETED_WAITING_APPROVAL`/`SCAN_FAILED`, plus every
 finding's fix sub-state. It lives in Redis (`redis-main`), written by
-`services/main/src/services/scanStore.js`, and is mirrored into MongoDB
+`services/main_services/src/services/scanStore.js`, and is mirrored into MongoDB
 `scan_history` by `ai-storage-service` once a scan completes (see
 [`database-schema.md`](./database-schema.md)).
 

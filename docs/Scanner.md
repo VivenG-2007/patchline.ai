@@ -1,6 +1,6 @@
 # PatchLine — Scanner (Deterministic + AI Supplemental)
 
-Covers `POST /api/scanner/scan` end to end: `services/main/src/controllers/scannerController.js` (queueing) → `services/main/src/workers/scannerWorkers.js` (BullMQ job) → `ai-service`'s `POST /scan` (`app/routers/scanner.py:run_scan`).
+Covers `POST /api/scanner/scan` end to end: `services/main_services/src/controllers/scannerController.js` (queueing) → `services/main_services/src/workers/scannerWorkers.js` (BullMQ job) → `ai-service`'s `POST /scan` (`app/routers/scanner.py:run_scan`).
 
 ## 1. Three Deterministic Engines (Zero Token Cost)
 

@@ -9,8 +9,8 @@ comments).
 
 | Machine | JS implementation | Python implementation |
 |---|---|---|
-| Scan lifecycle | `services/main/src/services/scanState.js` | *(scan lifecycle only lives in main-service — ai-storage-service doesn't own scan status)* |
-| Finding fix lifecycle | `services/main/src/services/findingState.js` | `services/ai_services/app/services/state_machine.py` |
+| Scan lifecycle | `services/main_services/src/services/scanState.js` | *(scan lifecycle only lives in main-service — ai-storage-service doesn't own scan status)* |
+| Finding fix lifecycle | `services/main_services/src/services/findingState.js` | `services/ai_services/app/services/state_machine.py` |
 
 Both are simple `{status: [allowedNextStatuses]}` tables plus an
 `assertTransition` function that throws (JS: `InvalidTransitionError`, HTTP
