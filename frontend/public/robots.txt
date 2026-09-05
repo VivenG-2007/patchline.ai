@@ -1,0 +1,18 @@
+# https://www.robotstxt.org/robotstxt.html
+User-agent: *
+Allow: /
+
+# Authenticated app screens — nothing useful for a crawler to index, and
+# every one of these redirects an unauthenticated request to /login anyway.
+Disallow: /dashboard
+Disallow: /scanner
+Disallow: /github
+Disallow: /jira
+Disallow: /upload
+Disallow: /onboarding
+
+# Internal design/component previews, not the shipped landing page.
+Disallow: /aurora
+Disallow: /aurora-hero-demo
+
+Sitemap: https://patchline.ai/sitemap.xml

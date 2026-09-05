@@ -1,0 +1,36 @@
+{
+  "name": "auth-service",
+  "version": "1.0.0",
+  "description": "Patchline auth service. Issues RS256 JWTs as httpOnly cookies + Bearer tokens. Owns the private key; every other service verifies locally with the public key.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "generate-keys": "node scripts/generate-keys.js",
+    "test": "node --test test/*.test.js",
+    "lint": "eslint src --ext .js"
+  },
+  "engines": { "node": ">=22.0.0" },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mongoose": "^8.5.0",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "helmet": "^7.1.0",
+    "compression": "^1.7.4",
+    "ioredis": "^5.4.1",
+    "express-rate-limit": "^7.4.0",
+    "rate-limit-redis": "^4.2.0",
+    "express-validator": "^7.2.0",
+    "uuid": "^10.0.0",
+    "pino": "^9.3.2",
+    "pino-http": "^10.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4",
+    "eslint": "^8.57.0"
+  }
+}

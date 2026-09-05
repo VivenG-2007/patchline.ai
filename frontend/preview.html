@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en" class="dark" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Patchline UI — Dual-Theme Architectural Preview</title>
+  <!-- Tailwind CSS CDN for instant standalone visual demonstration -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    :root, [data-theme="dark"] {
+      color-scheme: dark;
+      --bg-base: #070a12;
+      --bg-card: #0d1322;
+      --bg-subtle: #111827;
+      --border-default: rgba(51, 65, 85, 0.6);
+      --border-hover: rgba(71, 85, 105, 0.8);
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+
+      --accent-cyan: #06b6d4;
+      --accent-cyan-soft: rgba(6, 182, 212, 0.14);
+      --accent-emerald: #10b981;
+      --accent-emerald-soft: rgba(16, 185, 129, 0.14);
+      --accent-amber: #f59e0b;
+      --accent-amber-soft: rgba(245, 158, 11, 0.14);
+      --accent-rose: #ef4444;
+      --accent-rose-soft: rgba(239, 68, 68, 0.14);
+      --accent-purple: #a855f7;
+      --accent-purple-soft: rgba(168, 85, 247, 0.14);
+
+      --terminal-bg: #050810;
+      --card-glow: 0 0 25px -5px rgba(6, 182, 212, 0.12);
+      --grid-line-color: rgba(6, 182, 212, 0.05);
+    }
+
+    [data-theme="light"] {
+      color-scheme: light;
+      --bg-base: #f8fafc;
+      --bg-card: #ffffff;
+      --bg-subtle: #f1f5f9;
+      --border-default: rgba(226, 232, 240, 0.9);
+      --border-hover: rgba(203, 213, 225, 1.0);
+      --text-primary: #0f172a;
+      --text-secondary: #475569;
+      --text-muted: #94a3b8;
+
+      --accent-cyan: #0284c7;
+      --accent-cyan-soft: rgba(2, 132, 199, 0.1);
+      --accent-emerald: #059669;
+      --accent-emerald-soft: rgba(5, 150, 105, 0.1);
+      --accent-amber: #d97706;
+      --accent-amber-soft: rgba(217, 119, 6, 0.1);
+      --accent-rose: #dc2626;
+      --accent-rose-soft: rgba(220, 38, 38, 0.1);
+      --accent-purple: #7c3aed;
+      --accent-purple-soft: rgba(124, 58, 237, 0.1);
+
+      --terminal-bg: #0f172a;
+      --card-glow: 0 10px 25px -5px rgba(15, 23, 42, 0.05);
+      --grid-line-color: rgba(2, 132, 199, 0.04);
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      font-family: 'Inter', sans-serif;
+      transition: background-color 0.3s ease, color 0.2s ease;
+      min-height: 100vh;
+    }
+
+    .font-display { font-family: 'Geist', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+    .card-surface {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border-default);
+      box-shadow: var(--card-glow);
+      transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+    .card-surface:hover { border-color: var(--border-hover); }
+
+    .grid-overlay {
+      background-image:
+        linear-gradient(var(--grid-line-color) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-line-color) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.7); }
+      70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(6, 182, 212, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
+    }
+    .pulse-ring-active { animation: pulse-ring 2s infinite cubic-bezier(0.4, 0, 0.6, 1); }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.35; transform: scale(0.85); }
+    }
+    .pulse-dot { animation: pulse-dot 1.6s ease-in-out infinite; }
+
+    @keyframes scanline-sweep {
+      0% { transform: translateY(-100%); }
+      100% { transform: translateY(2200%); }
+    }
+    .scanline {
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
+      animation: scanline-sweep 2.4s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body class="grid-overlay pb-20">
+
+  <!-- Floating Theme Switcher Header -->
+  <header class="sticky top-0 z-50 backdrop-blur-md border-b border-[var(--border-default)] bg-[var(--bg-card)]/80">
+    <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-xl bg-[var(--accent-cyan-soft)] border border-[var(--accent-cyan)]/30 flex items-center justify-center text-[var(--accent-cyan)] font-bold">
+          🛡️
+        </div>
+        <div class="font-display font-bold text-lg text-[var(--text-primary)]">
+          PatchLine <span class="text-[var(--accent-cyan)] font-mono text-xs">AI</span>
+        </div>
+        <span class="hidden sm:inline-flex font-mono text-[10px] uppercase px-2 py-0.5 rounded bg-[var(--accent-emerald-soft)] text-[var(--accent-emerald)] border border-[var(--accent-emerald)]/30">
+          ● Dual-Theme Architecture Preview
+        </span>
+      </div>
+
+      <div class="flex items-center gap-4">
+        <!-- Live Theme Toggle Button -->
+        <div class="flex items-center gap-1 p-1 rounded-xl bg-[var(--bg-subtle)] border border-[var(--border-default)]">
+          <button id="theme-dark-btn" onclick="setTheme('dark')" class="px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all bg-[var(--bg-card)] text-[var(--accent-cyan)] shadow-sm">
+            🌙 Dark Obsidian
+          </button>
+          <button id="theme-light-btn" onclick="setTheme('light')" class="px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+            ☀️ Light Enterprise
+          </button>
+        </div>
+
+        <a href="/" class="px-3 py-1.5 rounded-lg bg-[var(--accent-cyan)] text-white text-xs font-mono font-semibold hover:opacity-90 transition-opacity">
+          Open Next.js App →
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 pt-10 space-y-10">
+
+    <!-- 1. Executive Dashboard Section -->
+    <section class="space-y-6">
+      <div class="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <div class="font-mono text-xs uppercase tracking-wider text-[var(--accent-cyan)] flex items-center gap-1.5 mb-1">
+            <span class="w-2 h-2 rounded-full bg-[var(--accent-cyan)] pulse-dot"></span>
+            Security Operations Telemetry
+          </div>
+          <h1 class="font-display text-3xl font-bold text-[var(--text-primary)]">
+            Autonomous Vulnerability Radar
+          </h1>
+        </div>
+        <div class="font-mono text-xs text-[var(--text-muted)]">
+          Theme Mode: <strong id="theme-label" class="text-[var(--accent-cyan)]">Deep Obsidian Cyber</strong>
+        </div>
+      </div>
+
+      <!-- Executive KPI Cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="card-surface p-5 rounded-2xl">
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="text-xs font-mono uppercase text-[var(--text-muted)]">Clearance &amp; Coverage</div>
+              <div class="font-display text-3xl font-bold text-[var(--text-primary)] mt-1">6 <span class="text-sm font-normal text-[var(--text-secondary)]">Repos</span></div>
+            </div>
+            <div class="w-10 h-10 rounded-xl bg-[var(--accent-cyan-soft)] text-[var(--accent-cyan)] flex items-center justify-center font-bold">📡</div>
+          </div>
+          <div class="mt-4 pt-3 border-t border-[var(--border-default)] flex justify-between text-xs font-mono text-[var(--accent-emerald)]">
+            <span>Clearance Rate</span>
+            <span>▲ 96.2% Clean</span>
+          </div>
+        </div>
+
+        <div class="card-surface p-5 rounded-2xl">
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="text-xs font-mono uppercase text-[var(--text-muted)]">Active Pipelines</div>
+              <div class="font-display text-3xl font-bold text-[var(--text-primary)] mt-1">1 <span class="text-sm font-normal text-[var(--text-secondary)]">Live</span></div>
+            </div>
+            <div class="w-10 h-10 rounded-xl bg-[var(--accent-emerald-soft)] text-[var(--accent-emerald)] flex items-center justify-center font-bold">⚡</div>
+          </div>
+          <div class="mt-4 pt-3 border-t border-[var(--border-default)] flex justify-between text-xs font-mono text-[var(--accent-emerald)]">
+            <span>Worker Daemon</span>
+            <span>● 0 Delay Queue</span>
+          </div>
+        </div>
+
+        <div class="card-surface p-5 rounded-2xl">
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="text-xs font-mono uppercase text-[var(--text-muted)]">Open Vulnerabilities</div>
+              <div class="font-display text-3xl font-bold text-[var(--text-primary)] mt-1">14 <span class="text-sm font-normal text-[var(--text-secondary)]">Total</span></div>
+            </div>
+            <div class="w-10 h-10 rounded-xl bg-[var(--accent-rose-soft)] text-[var(--accent-rose)] flex items-center justify-center font-bold">⚠️</div>
+          </div>
+          <div class="mt-4 pt-3 border-t border-[var(--border-default)] flex justify-between text-xs font-mono text-[var(--accent-rose)]">
+            <span>3 Critical</span>
+            <span class="text-[var(--accent-amber)]">5 High</span>
+            <span class="text-[var(--accent-cyan)]">6 Med</span>
+          </div>
+        </div>
+
+        <div class="card-surface p-5 rounded-2xl">
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="text-xs font-mono uppercase text-[var(--text-muted)]">Verified Patches</div>
+              <div class="font-display text-3xl font-bold text-[var(--text-primary)] mt-1">9 <span class="text-sm font-normal text-[var(--text-secondary)]">PRs</span></div>
+            </div>
+            <div class="w-10 h-10 rounded-xl bg-[var(--accent-purple-soft)] text-[var(--accent-purple)] flex items-center justify-center font-bold">✨</div>
+          </div>
+          <div class="mt-4 pt-3 border-t border-[var(--border-default)] flex justify-between text-xs font-mono text-[var(--accent-purple)]">
+            <span>Mean Time to Fix</span>
+            <span>1.4 min</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Interactive 8-Stage Pipeline Stepper Section -->
+    <section class="space-y-4">
+      <div class="font-mono text-xs uppercase tracking-wider text-[var(--accent-cyan)] font-semibold">
+        Interactive 8-Stage Security Pipeline Stepper
+      </div>
+
+      <div class="card-surface p-6 rounded-2xl relative overflow-hidden">
+        <div class="scanline"></div>
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+          <div>
+            <h2 class="font-display text-xl font-bold text-[var(--text-primary)]">
+              Scan Pipeline: octocat/secure-api (main)
+            </h2>
+            <p class="text-xs text-[var(--text-secondary)] mt-0.5">Click any stage below to inspect real-time log traces &amp; AST engine metrics.</p>
+          </div>
+          <div class="font-mono text-sm px-3 py-1 rounded-lg bg-[var(--bg-subtle)] border border-[var(--border-default)] text-[var(--accent-cyan)] font-semibold">
+            Stage 5/8 Active · 62%
+          </div>
+        </div>
+
+        <!-- Stepper Buttons Grid -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3" id="stepper-container">
+          <!-- Populated by JavaScript -->
+        </div>
+
+        <!-- Stage Inspector Box -->
+        <div class="mt-5 p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--border-default)]" id="stage-inspector">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-display font-semibold text-sm text-[var(--text-primary)]" id="inspector-title">Stage 5: AI Semantic Analysis</span>
+            <span class="font-mono text-[10px] px-2 py-0.5 rounded bg-[var(--bg-card)] border border-[var(--border-default)] text-[var(--accent-cyan)]" id="inspector-engine">GPT-4.1 mini AI Engine</span>
+          </div>
+          <p class="text-xs text-[var(--text-secondary)] mb-3" id="inspector-desc">Deep semantic analysis, exploitability validation, and false-positive pruning.</p>
+          <div class="p-3 rounded-lg bg-[var(--terminal-bg)] border border-white/10 font-mono text-xs text-slate-300 space-y-1" id="inspector-logs">
+            <div>[1] Generating token embeddings with RAG memory recall…</div>
+            <div>[2] Evaluating data-flow sanitization context…</div>
+            <div class="text-[var(--accent-emerald)] font-semibold">[3] Confirmed true-positive vulnerability: confidence 98.4%.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Finding Card with Unified Diff & Human Authorization Gate -->
+    <section class="space-y-4">
+      <div class="font-mono text-xs uppercase tracking-wider text-[var(--accent-cyan)] font-semibold">
+        Flaw Card with Human Gate &amp; Syntax-Highlighted Diff
+      </div>
+
+      <div class="card-surface p-6 rounded-2xl space-y-4">
+        <div class="flex flex-col md:flex-row md:items-start justify-between gap-4">
+          <div class="space-y-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-mono text-xs px-2.5 py-0.5 rounded bg-[var(--accent-rose-soft)] text-[var(--accent-rose)] border border-[var(--accent-rose)]/30 font-bold">
+                CRITICAL · CVSS 8.8
+              </span>
+              <span class="font-mono text-xs px-2 py-0.5 rounded bg-[var(--bg-subtle)] border border-[var(--border-default)] text-[var(--text-muted)]">
+                CWE-89 (SQL Injection)
+              </span>
+              <span class="font-mono text-xs px-2 py-0.5 rounded bg-[var(--accent-purple-soft)] text-[var(--accent-purple)]">
+                AI Validated (High Confidence)
+              </span>
+            </div>
+
+            <h3 class="font-display text-lg font-bold text-[var(--text-primary)]">
+              SQL Injection via Unsanitized User Identifier
+            </h3>
+
+            <p class="text-xs text-[var(--text-secondary)] leading-relaxed max-w-3xl">
+              Raw template string interpolation into raw SQL query allows arbitrary SQL execution without parameter binding.
+            </p>
+
+            <div class="font-mono text-xs text-[var(--text-muted)]">
+              File: <span class="text-[var(--text-primary)] font-semibold">src/controllers/userController.js</span><span class="text-[var(--accent-cyan)]">:42</span>
+            </div>
+          </div>
+
+          <!-- Human Gate Button -->
+          <div class="flex flex-col sm:items-end gap-1.5 shrink-0" id="approval-gate-container">
+            <button onclick="approveFix()" id="approve-btn" class="px-4 py-2 rounded-xl bg-[var(--accent-cyan)] text-white text-xs font-mono font-semibold hover:opacity-90 transition-all shadow-md">
+              ⚡ Approve &amp; Fix Patch
+            </button>
+            <span class="font-mono text-[10px] text-[var(--text-muted)]" id="gate-caption">
+              🔒 Human Approval Gate (3 attempts max)
+            </span>
+          </div>
+        </div>
+
+        <!-- Syntax-Highlighted Diff Preview -->
+        <div class="mt-4 pt-4 border-t border-[var(--border-default)]">
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-mono text-xs font-semibold text-[var(--text-secondary)]">patchline_remediation.diff</span>
+            <button onclick="copyPatchPreview()" id="copy-diff-btn" class="text-xs font-mono text-[var(--accent-cyan)] hover:underline">
+              Copy Patch
+            </button>
+          </div>
+          <div class="p-4 rounded-xl bg-[var(--terminal-bg)] border border-white/10 font-mono text-xs space-y-1 overflow-x-auto">
+            <div class="text-slate-500">@@ -40,5 +40,7 @@</div>
+            <div class="bg-[var(--accent-rose-soft)] text-[var(--accent-rose)] px-2 py-0.5 rounded">-  const query = `SELECT * FROM users WHERE id = '${userId}'`;</div>
+            <div class="bg-[var(--accent-rose-soft)] text-[var(--accent-rose)] px-2 py-0.5 rounded">-  const user = await db.query(query);</div>
+            <div class="bg-[var(--accent-emerald-soft)] text-[var(--accent-emerald)] px-2 py-0.5 rounded">+  const query = 'SELECT * FROM users WHERE id = $1';</div>
+            <div class="bg-[var(--accent-emerald-soft)] text-[var(--accent-emerald)] px-2 py-0.5 rounded">+  const user = await db.query(query, [userId]);</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. 5-Stage Remediation Roadmap -->
+    <section class="space-y-4">
+      <div class="font-mono text-xs uppercase tracking-wider text-[var(--accent-cyan)] font-semibold">
+        5-Stage Automated Remediation Timeline
+      </div>
+
+      <div class="card-surface p-6 rounded-2xl">
+        <div class="relative pl-6 space-y-6 before:absolute before:left-3.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-[var(--border-default)]">
+          
+          <div class="relative">
+            <div class="absolute -left-[31px] top-0.5 w-7 h-7 rounded-full bg-[var(--accent-rose)] text-white flex items-center justify-center font-bold text-xs">1</div>
+            <div>
+              <div class="font-display font-semibold text-sm text-[var(--text-primary)]">Stage 1: Vulnerability Detected</div>
+              <p class="text-xs text-[var(--text-secondary)] mt-0.5">Matched CWE-89 pattern in src/controllers/userController.js:42 via Tree-sitter AST parser.</p>
+            </div>
+          </div>
+
+          <div class="relative">
+            <div class="absolute -left-[31px] top-0.5 w-7 h-7 rounded-full bg-[var(--accent-purple)] text-white flex items-center justify-center font-bold text-xs">2</div>
+            <div>
+              <div class="font-display font-semibold text-sm text-[var(--text-primary)]">Stage 2: Fix Synthesized</div>
+              <p class="text-xs text-[var(--text-secondary)] mt-0.5">GPT-4.1 mini synthesized parameterized query replacement on isolated branch fix/patchline-cwe89.</p>
+            </div>
+          </div>
+
+          <div class="relative">
+            <div class="absolute -left-[31px] top-0.5 w-7 h-7 rounded-full bg-[var(--accent-cyan)] text-white flex items-center justify-center font-bold text-xs">3</div>
+            <div>
+              <div class="font-display font-semibold text-sm text-[var(--text-primary)]">Stage 3: Deterministic Regression Testing</div>
+              <p class="text-xs text-[var(--text-secondary)] mt-0.5">Static analysis re-scan &amp; test suite executed across whole repository.</p>
+            </div>
+          </div>
+
+          <div class="relative">
+            <div class="absolute -left-[31px] top-0.5 w-7 h-7 rounded-full bg-[var(--accent-emerald)] text-white flex items-center justify-center font-bold text-xs">4</div>
+            <div>
+              <div class="font-display font-semibold text-sm text-[var(--text-primary)]">Stage 4: Verified &amp; Certified</div>
+              <p class="text-xs text-[var(--text-secondary)] mt-0.5">0 new vulnerabilities introduced. Patch verified safe for production.</p>
+            </div>
+          </div>
+
+          <div class="relative">
+            <div class="absolute -left-[31px] top-0.5 w-7 h-7 rounded-full bg-[var(--accent-emerald)] text-white flex items-center justify-center font-bold text-xs">5</div>
+            <div>
+              <div class="font-display font-semibold text-sm text-[var(--text-primary)]">Stage 5: Pull Request Opened</div>
+              <p class="text-xs text-[var(--text-secondary)] mt-0.5">Dispatched PR #42 to GitHub for team code review and merging.</p>
+              <div class="mt-2">
+                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[var(--accent-emerald)] text-white text-xs font-mono font-semibold">
+                  🐙 PR #42 on octocat/secure-api
+                </span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    const stages = [
+      { id: 1, name: 'Queued', engine: 'Redis BullMQ Worker', desc: 'Job verified and enqueued in priority daemon.', logs: ['Claimed job from BullMQ queue', 'Worker thread spawned'] },
+      { id: 2, name: 'Scanning', engine: 'Git Sparse Checkout', desc: 'Cloning workspace files and traversing tree.', logs: ['Indexed 142 source files', 'Resolved submodule dependencies'] },
+      { id: 3, name: 'Parsing', engine: 'Tree-Sitter AST Engine', desc: 'Constructing Abstract Syntax Trees for all modules.', logs: ['Parsed JavaScript & Python modules', 'Symbol table initialized'] },
+      { id: 4, name: 'SAST', engine: 'Semgrep Core Ruleset', desc: 'Executing deterministic OWASP rulesets.', logs: ['Executed 248 security rules', 'Flagged CWE-89 pattern sink'] },
+      { id: 5, name: 'AI Analysis', engine: 'GPT-4.1 mini Contextual Reasoner', desc: 'Deep semantic analysis, exploitability validation, and false-positive pruning.', logs: ['Evaluated taint propagation graph', 'Confirmed true-positive flaw (98.4%)'] },
+      { id: 6, name: 'Fix Synthesis', engine: 'Codex-5.3 Patch Generator', desc: 'Synthesizing isolated patch unified diff.', logs: ['Spawned branch fix/patchline-cwe89', 'Synthesized parameterized diff'] },
+      { id: 7, name: 'Regression', engine: 'AST Deterministic Re-scanner', desc: 'Certifying 0 regressions introduced.', logs: ['Re-ran security ruleset pass', '0 regressions certified'] },
+      { id: 8, name: 'Ready', engine: 'Patchline Gatekeeper', desc: 'Human authorization gate armed.', logs: ['Blob artifact uploaded to Azure', 'Awaiting human authorization'] }
+    ];
+
+    let currentStage = 5;
+
+    function renderStepper() {
+      const container = document.getElementById('stepper-container');
+      container.innerHTML = stages.map((s, idx) => {
+        const isDone = idx < 4;
+        const isActive = idx === 4;
+        return `
+          <button onclick="inspectStage(${idx})" class="p-3 rounded-xl border transition-all text-center flex flex-col items-center ${
+            isActive ? 'border-[var(--accent-cyan)] bg-[var(--bg-card)] ring-2 ring-[var(--accent-cyan)]/30' :
+            isDone ? 'border-[var(--accent-emerald)]/40 bg-[var(--bg-card)]' : 'border-[var(--border-default)] bg-[var(--bg-subtle)] opacity-70'
+          }">
+            <div class="w-7 h-7 rounded-full flex items-center justify-center font-mono text-xs font-bold mb-1.5 ${
+              isDone ? 'bg-[var(--accent-emerald)] text-white' :
+              isActive ? 'bg-[var(--accent-cyan)] text-white pulse-ring-active' :
+              'bg-[var(--bg-subtle)] text-[var(--text-muted)] border border-[var(--border-default)]'
+            }">
+              ${isDone ? '✓' : s.id}
+            </div>
+            <div class="font-display text-xs font-semibold text-[var(--text-primary)] truncate w-full">${s.name}</div>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function inspectStage(idx) {
+      const s = stages[idx];
+      document.getElementById('inspector-title').textContent = `Stage ${s.id}: ${s.name}`;
+      document.getElementById('inspector-engine').textContent = s.engine;
+      document.getElementById('inspector-desc').textContent = s.desc;
+      document.getElementById('inspector-logs').innerHTML = s.logs.map((l, i) => `<div>[${i+1}] ${l}</div>`).join('');
+    }
+
+    function setTheme(mode) {
+      document.documentElement.setAttribute('data-theme', mode);
+      document.documentElement.className = mode;
+      localStorage.setItem('patchline_theme', mode);
+
+      const darkBtn = document.getElementById('theme-dark-btn');
+      const lightBtn = document.getElementById('theme-light-btn');
+      const label = document.getElementById('theme-label');
+
+      if (mode === 'dark') {
+        darkBtn.className = 'px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all bg-[var(--bg-card)] text-[var(--accent-cyan)] shadow-sm';
+        lightBtn.className = 'px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all text-[var(--text-muted)] hover:text-[var(--text-primary)]';
+        label.textContent = 'Deep Obsidian Cyber';
+      } else {
+        lightBtn.className = 'px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all bg-[var(--bg-card)] text-[var(--accent-cyan)] shadow-sm';
+        darkBtn.className = 'px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all text-[var(--text-muted)] hover:text-[var(--text-primary)]';
+        label.textContent = 'Clean Enterprise Alabaster';
+      }
+    }
+
+    function approveFix() {
+      const container = document.getElementById('approval-gate-container');
+      container.innerHTML = `
+        <div class="px-3.5 py-1.5 rounded-xl bg-[var(--accent-emerald-soft)] border border-[var(--accent-emerald)] text-[var(--accent-emerald)] font-mono text-xs font-bold flex items-center gap-1.5">
+          ✓ 0 Regressions Certified · PR #42 Created
+        </div>
+      `;
+    }
+
+    function copyPatchPreview() {
+      const btn = document.getElementById('copy-diff-btn');
+      btn.textContent = 'Copied to Clipboard!';
+      setTimeout(() => { btn.textContent = 'Copy Patch'; }, 2000);
+    }
+
+    renderStepper();
+  </script>
+</body>
+</html>
