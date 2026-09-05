@@ -878,7 +878,7 @@ def _strip_code_fences(raw: str) -> str:
 def _parse_json_object(raw: str) -> dict:
     cleaned = _strip_code_fences(raw)
     try:
-        return json.loads(cleaned)
+        return json.loads(cleaned, strict=False)
     except Exception:
         pass
 
@@ -886,7 +886,16 @@ def _parse_json_object(raw: str) -> dict:
     fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
     if fence_match:
         try:
-            return json.loads(fence_match.group(1).strip())
+            return json.loads(fence_match.group(1).strip(), strict=False)
+        except Exception:
+            pass
+
+    # If the response starts directly with key-value pair without opening brace (e.g. '"fixedFileContent": ...')
+    trimmed = cleaned.strip()
+    if not trimmed.startswith("{") and ":" in trimmed:
+        candidate_wrapped = "{" + trimmed + ("}" if not trimmed.endswith("}") else "")
+        try:
+            return json.loads(candidate_wrapped, strict=False)
         except Exception:
             pass
 
@@ -896,13 +905,29 @@ def _parse_json_object(raw: str) -> dict:
     if first_brace != -1 and last_brace > first_brace:
         candidate = raw[first_brace:last_brace + 1]
         try:
-            return json.loads(candidate)
+            return json.loads(candidate, strict=False)
         except Exception:
             candidate_clean = re.sub(r",\s*([\}\]])", r"\1", candidate)
             try:
-                return json.loads(candidate_clean)
+                return json.loads(candidate_clean, strict=False)
             except Exception:
                 pass
+
+    # Fallback for fix generation responses containing fixedFileContent and summary
+    content_match = re.search(r'"fixedFileContent"\s*:\s*"(.*?)"\s*,\s*"summary"', raw, re.DOTALL)
+    if not content_match:
+        content_match = re.search(r'"fixedFileContent"\s*:\s*"(.*)"', raw, re.DOTALL)
+    summary_match = re.search(r'"summary"\s*:\s*"(.*?)"', raw, re.DOTALL)
+    if content_match:
+        extracted = content_match.group(1)
+        try:
+            cleaned_content = extracted.encode("utf-8").decode("unicode_escape")
+        except Exception:
+            cleaned_content = extracted.replace("\\n", "\n").replace('\\"', '"').replace("\\\\", "\\")
+        return {
+            "fixedFileContent": cleaned_content,
+            "summary": summary_match.group(1) if summary_match else "Applied AI-generated remediation",
+        }
 
     raise ValueError(f"Could not parse valid JSON object from LLM response (len={len(raw)})")
 
