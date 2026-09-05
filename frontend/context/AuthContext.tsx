@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { authApi, AuthUser, setAccessToken, clearAccessToken } from '@/lib/api';
+import { authApi, AuthUser } from '@/lib/api';
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -54,9 +54,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const { data } = await authApi.post('/api/auth/login', { email, password });
       setUser(data.user);
-      // Store the access token in memory so mainApi can send it as a Bearer
-      // header to main-service (cross-domain — cookie won't be sent there).
-      if (data.accessToken) setAccessToken(data.accessToken);
     } catch (err: any) {
       setError(err?.response?.data?.error?.message || 'Login failed');
       throw err;
@@ -68,7 +65,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const { data } = await authApi.post('/api/auth/register', { name, email, password });
       setUser(data.user);
-      if (data.accessToken) setAccessToken(data.accessToken);
     } catch (err: any) {
       setError(err?.response?.data?.error?.message || 'Registration failed');
       throw err;
@@ -80,7 +76,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await authApi.post('/api/auth/logout');
     } finally {
       setUser(null);
-      clearAccessToken();
     }
   };
 

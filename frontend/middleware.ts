@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { jwtVerify } from 'jose/jwt/verify';
-import { importSPKI } from 'jose/key/import';
+import { jwtVerify, importSPKI } from 'jose';
 
 // Runs at the edge before /dashboard and /upload render. This is a UX
 // short-circuit (fast redirect to /login for an obviously missing/expired
@@ -15,7 +14,7 @@ const AUTH_API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:5
 function decodeKey(base64Value: string | undefined) {
   if (!base64Value) return null;
   try {
-    return typeof atob === 'function' ? atob(base64Value) : Buffer.from(base64Value, 'base64').toString('utf8');
+    return Buffer.from(base64Value, 'base64').toString('utf8');
   } catch {
     return null;
   }
@@ -64,6 +63,11 @@ async function tryRefresh(req: NextRequest): Promise<string[] | null> {
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return null;
+
+    // getSetCookie() is the correct way to read multiple Set-Cookie headers
+    // (a plain .get('set-cookie') collapses them into one comma-joined
+    // string per the Headers spec, which breaks on cookies with commas in
+    // e.g. their Expires attribute). Supported by the Next.js edge runtime.
     const setCookies = res.headers.getSetCookie?.() ?? [];
     return setCookies.length > 0 ? setCookies : null;
   } catch {
@@ -78,36 +82,29 @@ export async function middleware(req: NextRequest) {
   const token = req.cookies.get('access_token')?.value;
   const publicKeyPem = decodeKey(process.env.JWT_PUBLIC_KEY_BASE64);
 
-  // Case 1: We have a token and a key — verify it locally.
   if (token && publicKeyPem) {
     if (await isValidAccessToken(token, publicKeyPem)) {
       return NextResponse.next();
     }
-    // Token is present but INVALID/EXPIRED — try a silent refresh.
-    const setCookieHeaders = await tryRefresh(req);
-    if (setCookieHeaders) {
-      const response = NextResponse.next();
-      for (const cookie of setCookieHeaders) {
-        response.headers.append('set-cookie', cookie);
-      }
-      return response;
-    }
-    // Token was positively invalid and refresh failed — redirect to login.
-    return NextResponse.redirect(new URL('/login', req.url));
-  }
-
-  // Case 2: Token present but no key configured — pass through.
-  // Client-side AuthContext + backend 401s are the authority.
-  if (token && !publicKeyPem) {
+  } else if (token && !publicKeyPem) {
+    // Key not configured for this deployment — fall back to letting the
+    // client-side AuthContext + backend 401s handle protection instead of
+    // hard-blocking every request.
     return NextResponse.next();
   }
 
-  // Case 3: No token cookie at all.
-  // In same-domain (localhost) this means truly logged out.
-  // In cross-domain production (Vercel + Render) the cookie simply isn't
-  // visible here — the client-side AuthContext will detect the auth state
-  // and redirect if needed. Pass through to avoid infinite loops.
-  return NextResponse.next();
+  // Access token missing, or present but invalid/expired — try to refresh
+  // before giving up on the session.
+  const setCookieHeaders = await tryRefresh(req);
+  if (setCookieHeaders) {
+    const response = NextResponse.next();
+    for (const cookie of setCookieHeaders) {
+      response.headers.append('set-cookie', cookie);
+    }
+    return response;
+  }
+
+  return NextResponse.redirect(new URL('/login', req.url));
 }
 
 export const config = {

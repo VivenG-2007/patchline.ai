@@ -140,10 +140,7 @@ function OnboardingInner() {
               title="Connect GitHub Organization"
               description="Patchline scans your repositories, checks AST syntax, and opens tested pull requests once fixes are approved."
               connected={githubConnected}
-              onConnect={async () => {
-                const res = await githubApi.connect('/onboarding?step=2');
-                window.location.href = res.data.url;
-              }}
+              connectHref={githubApi.connectUrl('/onboarding?step=2')}
               connectLabel="Connect GitHub Account"
               onSkip={() => goToStep(2)}
               onContinue={() => goToStep(2)}
@@ -157,10 +154,7 @@ function OnboardingInner() {
               title="Connect Atlassian Jira"
               description="Optional — Patchline automatically creates tracked Jira issue tickets for discovered high-severity vulnerabilities."
               connected={jiraConnected}
-              onConnect={async () => {
-                const res = await jiraApi.connect('/onboarding?step=3');
-                window.location.href = res.data.url;
-              }}
+              connectHref={jiraApi.connectUrl('/onboarding?step=3')}
               connectLabel="Connect Jira Cloud"
               onSkip={() => goToStep(3)}
               onContinue={() => goToStep(3)}
@@ -196,35 +190,21 @@ function StepCard({
   title,
   description,
   connected,
+  connectHref,
   connectLabel,
   onSkip,
   onContinue,
-  onConnect,
 }: {
   icon: typeof GithubIcon;
   eyebrow: string;
   title: string;
   description: string;
   connected: boolean;
+  connectHref: string;
   connectLabel: string;
-  onConnect: () => Promise<void>;
   onSkip: () => void;
   onContinue: () => void;
 }) {
-  const [connecting, setConnecting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const handleConnect = async () => {
-    setConnecting(true);
-    setError(null);
-    try {
-      await onConnect();
-    } catch (err: any) {
-      const msg = err?.response?.data?.error?.message || err?.message || 'Failed to start connection. Please check server configuration.';
-      setError(msg);
-    } finally {
-      setConnecting(false);
-    }
-  };
   return (
     <div className="space-y-6">
       <div>
@@ -235,20 +215,16 @@ function StepCard({
         <p className="text-xs text-text-secondary mt-1.5 leading-relaxed">{description}</p>
       </div>
 
-      {error && <Alert className="mb-2">{error}</Alert>}
-
       {connected ? (
         <div className="flex items-center gap-2 text-xs font-mono text-accent-emerald bg-accent-emerald-soft p-3 rounded-lg border border-accent-emerald/30">
           <Check size={14} strokeWidth={2.5} /> Integration Active
         </div>
       ) : (
-        <Button
-          className="w-full py-2.5 text-xs font-mono gap-2"
-          disabled={connecting}
-          onClick={handleConnect}
-        >
-          <Icon size={16} /> {connecting ? 'Redirecting…' : connectLabel}
-        </Button>
+        <a href={connectHref} className="block">
+          <Button className="w-full py-2.5 text-xs font-mono gap-2">
+            <Icon size={16} /> {connectLabel}
+          </Button>
+        </a>
       )}
 
       {connected ? (

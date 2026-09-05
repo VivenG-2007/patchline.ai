@@ -36,19 +36,10 @@ function LoginForm() {
       } else {
         await login(email, password);
         setSuccess(true);
-        // Default to /dashboard — only redirect to /onboarding if we
-        // *positively* know both integrations are missing. If main_services
-        // is unreachable the status check will throw/reject, and we should
-        // still let the user into the dashboard rather than loop them into
-        // the onboarding wizard on every login.
-        let destination = '/dashboard';
-        try {
-          const { githubConnected, jiraConnected } = await getConnectionStatus();
-          if (!githubConnected && !jiraConnected) destination = '/onboarding';
-        } catch {
-          // main_services unreachable — don't block the user, go to dashboard
-        }
-        setTimeout(() => router.push(destination), 600);
+        const { githubConnected, jiraConnected } = await getConnectionStatus();
+        setTimeout(() => {
+          router.push(githubConnected && jiraConnected ? '/dashboard' : '/onboarding');
+        }, 600);
       }
     } catch {
       // error surfaced via useAuth().error

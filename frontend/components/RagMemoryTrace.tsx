@@ -17,7 +17,7 @@ export interface RagMemoryTraceProps {
   /** Whether the backend has RAG memory switched on */
   ragMemoryEnabled?: boolean;
   /** In-flight fix phase for this finding, or null once settled */
-  phase?: 'QUEUED' | 'PROCESSING' | 'VERIFIED' | 'FAILED' | 'NEEDS_REVIEW' | 'UNRESOLVED' | null;
+  phase?: 'QUEUED' | 'PROCESSING' | 'VERIFIED' | 'FAILED' | 'NEEDS_REVIEW' | null;
   /** Set once the fix call returns (verified or needs-review) */
   settled?: boolean;
   similarPastFixes?: SimilarPastFix[];

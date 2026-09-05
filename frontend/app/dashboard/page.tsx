@@ -52,13 +52,7 @@ interface DashboardStats {
     aiFixesApplied: { value: number; windowLabel?: string | null };
   };
   globalRiskScore: number;
-  riskScoreSeries: { day: string; date?: string; score: number; newFindings?: number; resolved?: number; scans?: number; remediated?: number }[];
-  activitySeries?: {
-    '1D': { day: string; newFindings: number; resolved: number; score?: number }[];
-    '1W': { day: string; date?: string; newFindings: number; resolved: number; score?: number }[];
-    '1M': { day: string; newFindings: number; resolved: number; score?: number }[];
-    '1Y': { day: string; newFindings: number; resolved: number; score?: number }[];
-  };
+  riskScoreSeries: { day: string; score: number; scans?: number; remediated?: number }[];
   activityFeed: { id: string; type: string; message: string; repo?: string; timestamp: string }[];
   repoHealth: RepoHealthItem[];
   severityBreakdown: { critical: number; high: number; medium: number; low?: number };
@@ -91,7 +85,6 @@ interface DashboardStats {
     provider?: string | null;
     count?: number;
   }[];
-  _serviceUnavailable?: boolean;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -244,13 +237,6 @@ export default function DashboardPage() {
         <ErrorBanner message={error} category="GATEWAY" onRetry={() => load()} className="mb-5" />
       )}
 
-      {stats?._serviceUnavailable && !error && (
-        <div className="mb-5 px-4 py-3 rounded-lg border text-sm flex items-center gap-2" style={{ background: 'var(--warning-subtle, #fef9c3)', borderColor: 'var(--warning, #ca8a04)', color: 'var(--warning-foreground, #78350f)' }}>
-          <span>⚠️</span>
-          <span><strong>AI service unreachable</strong> — dashboard is showing empty state. Ensure <code>AI_STORAGE_SERVICE_URL</code> is set correctly in your Render environment for <code>patchline-ai-uv72</code>.</span>
-        </div>
-      )}
-
       {loading ? (
         <DashboardSkeleton />
       ) : !stats ? (
@@ -280,7 +266,6 @@ export default function DashboardPage() {
             <div className="lg:col-span-2">
               <ScanTrendsChart
                 data={stats.riskScoreSeries}
-                seriesByRange={stats.activitySeries}
                 title="Security Activity"
                 subtitle="Open and resolved exposures overtime"
               />

@@ -28,7 +28,6 @@ import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import RagMemoryTrace, { SimilarPastFix } from '@/components/RagMemoryTrace';
 import { useToast } from '@/components/ToastNotification';
-import { scannerApi } from '@/lib/api';
 
 // Real, backend-confirmed fix-pipeline checkpoints (ai-storage-service's
 // app/services/scan_progress.py FIX_STAGES) → short human label. Keep in
@@ -36,10 +35,10 @@ import { scannerApi } from '@/lib/api';
 // an unrecognized stage string just falls back to the generic label below
 // rather than showing nothing.
 const FIX_STAGE_LABELS: Record<string, string> = {
-  FIX_GENERATING: 'Synthesizing patch on isolated branch…',
-  CODEX_VERIFYING: 'Running independent adversarial review…',
-  DETERMINISTIC_VERIFYING: 'Executing deterministic AST re-scan…',
-  RISK_RECALCULATING: 'Recalculating portfolio risk metrics…',
+  FIX_GENERATING: 'Generating patch (GPT-5.2)',
+  CODEX_VERIFYING: 'Independent review (Codex 5.3)',
+  DETERMINISTIC_VERIFYING: 'Deterministic re-scan',
+  RISK_RECALCULATING: 'Recalculating risk',
 };
 const MAX_FIX_ATTEMPTS = 3; // mirrors state_machine.MAX_FIX_ATTEMPTS — display only, never enforced client-side
 
@@ -57,7 +56,6 @@ export interface Finding {
   ruleKey?: string;
   evidence?: string[];
   cwe?: string;
-  jiraTicket?: { key: string; id?: string; url: string } | null;
 }
 
 
@@ -83,7 +81,6 @@ export interface FixStatus {
   summary?: string;
   details?: string;
   pullRequest?: { number: number; url: string };
-  jiraTicket?: { key: string; id?: string; url: string } | null;
   error?: string;
   attempts?: number;
   similarPastFixes?: SimilarPastFix[];
@@ -127,8 +124,6 @@ interface FindingCardProps {
   ragMemoryEnabled?: boolean;
   onApproveAndFix: (findingId: string) => Promise<void> | void;
   onViewDeepTimeline?: (finding: Finding) => void;
-  scanId?: string;
-  onPrCreated?: (findingId: string, pr: { number: number; url: string }) => void;
 }
 
 const SEVERITY_TONE: Record<Finding['severity'], 'critical' | 'warning' | 'info' | 'neutral'> = {
@@ -144,51 +139,20 @@ export default function FindingCard({
   ragMemoryEnabled = true,
   onApproveAndFix,
   onViewDeepTimeline,
-  scanId,
-  onPrCreated,
 }: FindingCardProps) {
   const [diffExpanded, setDiffExpanded] = useState(false);
   const [ragExpanded, setRagExpanded] = useState(true);
-  const [logsExpanded, setLogsExpanded] = useState(true);
   const [approving, setApproving] = useState(false);
-  const [creatingPr, setCreatingPr] = useState(false);
   const [copiedPatch, setCopiedPatch] = useState(false);
   const { addToast } = useToast();
 
-  const handleCreatePr = async () => {
-    if (!scanId || !finding.id || creatingPr) return;
-    setCreatingPr(true);
-    try {
-      const res = await scannerApi.createPr(scanId, finding.id);
-      const pr = res.data?.pullRequest;
-      if (pr) {
-        addToast({
-          type: 'success',
-          title: 'Pull Request Created',
-          message: `PR #${pr.number} opened successfully on GitHub.`,
-        });
-        if (onPrCreated) {
-          onPrCreated(finding.id, pr);
-        }
-      }
-    } catch (err: any) {
-      addToast({
-        type: 'error',
-        title: 'PR Creation Failed',
-        message: err?.response?.data?.error?.message || err?.message || 'Failed to create PR on GitHub.',
-      });
-    } finally {
-      setCreatingPr(false);
-    }
-  };
-
   const attempts = fixStatus?.attempts || 0;
   const maxAttemptsReached = attempts >= 3;
+  const isFixing = fixStatus?.phase === 'QUEUED' || fixStatus?.phase === 'PROCESSING' || approving;
   const isVerified = fixStatus?.phase === 'VERIFIED';
   const isNeedsReview = fixStatus?.phase === 'NEEDS_REVIEW';
   const isFailed = fixStatus?.phase === 'FAILED';
   const isUnresolved = fixStatus?.phase === 'UNRESOLVED';
-  const isFixing = !isFailed && !isUnresolved && (fixStatus?.phase === 'QUEUED' || fixStatus?.phase === 'PROCESSING' || approving);
   const isSettled = isVerified || isNeedsReview || isFailed || isUnresolved;
 
   // Never fabricate a patch. If the backend hasn't generated one yet (or a
@@ -206,70 +170,6 @@ export default function FindingCard({
   const verifyModelLabel = fixStatus?.verifyModel
     ? `${fixStatus.verifyModel} Evaluator & Deterministic Re-scanner`
     : 'AI Evaluator & Deterministic Re-scanner';
-
-  const remediationLogs = React.useMemo(() => {
-    const logs: { id: number; text: string; done: boolean; active?: boolean }[] = [];
-    const stage = fixStatus?.stage;
-
-    logs.push({
-      id: 1,
-      text: fixStatus?.fixBranch
-        ? `Git branch initialized: ${fixStatus.fixBranch}`
-        : 'Initializing isolated git remediation branch & AST context…',
-      done: Boolean(fixStatus?.fixBranch || isSettled || (stage && stage !== 'FIX_GENERATING')),
-      active: isFixing && (!stage || stage === 'FIX_GENERATING'),
-    });
-
-    logs.push({
-      id: 2,
-      text: fixStatus?.similarPastFixes && fixStatus.similarPastFixes.length > 0
-        ? `ChromaDB vector memory: recalled ${fixStatus.similarPastFixes.length} similar verified AST patch patterns`
-        : 'Querying vector memory store for similar verified fixes…',
-      done: Boolean((fixStatus?.similarPastFixes && fixStatus.similarPastFixes.length > 0) || isSettled || (stage && stage !== 'FIX_GENERATING')),
-      active: isFixing && (!stage || stage === 'FIX_GENERATING'),
-    });
-
-    logs.push({
-      id: 3,
-      text: fixStatus?.summary
-        ? `${fixModelLabel}: ${fixStatus.summary}`
-        : `Dispatching minimal, syntax-accurate patch synthesis to ${fixModelLabel}…`,
-      done: Boolean(fixStatus?.summary || isSettled || (stage && (stage === 'CODEX_VERIFYING' || stage === 'DETERMINISTIC_VERIFYING' || stage === 'RISK_RECALCULATING'))),
-      active: isFixing && stage === 'FIX_GENERATING',
-    });
-
-    const verifyModelLabel = fixStatus?.verifyModel || fixStatus?.aiVerification?.model || 'Codex';
-    logs.push({
-      id: 4,
-      text: fixStatus?.aiVerification?.status
-        ? `Adversarial review (${verifyModelLabel}): ${fixStatus.aiVerification.status}`
-        : `Running independent adversarial review (${verifyModelLabel})…`,
-      done: Boolean(fixStatus?.aiVerification || isSettled || (stage && (stage === 'DETERMINISTIC_VERIFYING' || stage === 'RISK_RECALCULATING'))),
-      active: isFixing && stage === 'CODEX_VERIFYING',
-    });
-
-    logs.push({
-      id: 5,
-      text: fixStatus?.deterministicVerification?.status
-        ? `Deterministic AST re-scan: ${fixStatus.deterministicVerification.status === 'PASSED' ? '0 matches (CLEAN)' : 'rule still matches'}`
-        : 'Executing deterministic AST re-scan to certify 0 regressions…',
-      done: Boolean(fixStatus?.deterministicVerification || isSettled || (stage && stage === 'RISK_RECALCULATING')),
-      active: isFixing && stage === 'DETERMINISTIC_VERIFYING',
-    });
-
-    if (isVerified || fixStatus?.pullRequest) {
-      logs.push({
-        id: 6,
-        text: fixStatus?.pullRequest
-          ? `GitHub PR #${fixStatus.pullRequest.number} opened and synced to dashboard`
-          : 'Finalizing unified diff & opening Pull Request…',
-        done: Boolean(fixStatus?.pullRequest),
-        active: isFixing && stage === 'RISK_RECALCULATING',
-      });
-    }
-
-    return logs;
-  }, [fixStatus, isFixing, isSettled, isVerified, fixModelLabel]);
 
   const handleApprove = async () => {
     if (maxAttemptsReached || isFixing) return;
@@ -383,7 +283,7 @@ export default function FindingCard({
                   ? `Fix Verified · ↓${Math.round(fixStatus.riskEvaluation.reductionPct)}% Risk`
                   : 'Fix Verified'}
               </div>
-              {fixStatus?.pullRequest ? (
+              {fixStatus?.pullRequest && (
                 <a
                   href={fixStatus.pullRequest.url}
                   target="_blank"
@@ -393,18 +293,7 @@ export default function FindingCard({
                   <GitPullRequest size={13} />
                   PR #{fixStatus.pullRequest.number} <ExternalLink size={11} />
                 </a>
-              ) : scanId && (fixStatus?.fixBranch || finding.suggestedFix) ? (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={handleCreatePr}
-                  disabled={creatingPr}
-                  className="text-xs inline-flex items-center gap-1.5 h-7 px-2.5"
-                >
-                  {creatingPr ? <Loader2 size={12} className="animate-spin" /> : <GitPullRequest size={12} />}
-                  {creatingPr ? 'Opening PR…' : 'Create PR'}
-                </Button>
-              ) : null}
+              )}
             </div>
           ) : isNeedsReview ? (
             <div className="flex flex-col sm:items-end gap-1.5">
@@ -412,41 +301,17 @@ export default function FindingCard({
                 <AlertTriangle size={14} />
                 Needs Human Review
               </div>
-              <div className="flex items-center gap-2">
-                {fixStatus?.pullRequest ? (
-                  <a
-                    href={fixStatus.pullRequest.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-mono text-accent-cyan hover:underline font-bold"
-                  >
-                    <GitPullRequest size={13} />
-                    PR #{fixStatus.pullRequest.number} <ExternalLink size={11} />
-                  </a>
-                ) : fixStatus?.fixBranch ? (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={handleCreatePr}
-                    disabled={creatingPr}
-                    className="text-xs inline-flex items-center gap-1.5 h-7 px-2.5"
-                  >
-                    {creatingPr ? <Loader2 size={12} className="animate-spin" /> : <GitPullRequest size={12} />}
-                    {creatingPr ? 'Opening PR…' : 'Create PR'}
-                  </Button>
-                ) : null}
-                {!maxAttemptsReached && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={handleApprove}
-                    disabled={isFixing}
-                    className="text-xs h-7 px-2.5"
-                  >
-                    Retry ({3 - attempts} left)
-                  </Button>
-                )}
-              </div>
+              {!maxAttemptsReached && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleApprove}
+                  disabled={isFixing}
+                  className="text-xs"
+                >
+                  Retry ({3 - attempts} left)
+                </Button>
+              )}
             </div>
           ) : isUnresolved ? (
             <div className="flex flex-col sm:items-end gap-1.5">
@@ -493,7 +358,7 @@ export default function FindingCard({
               )}
               {fixStatus?.stillProcessingInBackground && (
                 <span className="text-[10px] font-mono text-text-muted max-w-[220px] text-right">
-                  This is taking longer than usual (bounded retries can take a few minutes) — we&apos;re still
+                  This is taking longer than usual (bounded retries can take a few minutes) — we're still
                   checking. No need to re-approve.
                 </span>
               )}
@@ -531,55 +396,9 @@ export default function FindingCard({
       {/* ────────────────── Active Fix Details: Synthesis & Verification ────────────────── */}
       {(isFixing || isSettled || fixStatus?.summary || fixStatus?.fixBranch) && (
         <div className="pt-3 border-t border-border-default space-y-3">
-          {/* 4-Step Remediation Flow Stepper */}
-          <div className="rounded-xl border border-border-default bg-bg-card/70 p-3">
-            <div className="flex items-center justify-between text-[11px] font-mono text-text-muted mb-2 pb-1.5 border-b border-border-default/50">
-              <span className="flex items-center gap-1.5 font-semibold text-text-primary">
-                <span className={`w-2 h-2 rounded-full ${isFailed ? 'bg-accent-rose' : isVerified ? 'bg-accent-emerald' : isNeedsReview ? 'bg-accent-amber' : 'bg-accent-cyan pulse-dot'}`} />
-                PatchLine Autonomous Remediation Track
-              </span>
-              <span className={`text-[10px] ${isFailed ? 'text-accent-rose font-semibold' : isNeedsReview ? 'text-accent-amber' : 'text-accent-cyan'}`}>
-                {isVerified ? 'Completed · PR Active' : isFixing ? 'Synthesis & Verification in Flight' : isNeedsReview ? 'Human Review Needed' : isUnresolved ? 'Attempts Exhausted' : isFailed ? 'Remediation Attempt Failed' : 'Awaiting Authorization'}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {[
-                { step: 1, label: 'Branch & RAG', key: 'BRANCH', active: isFixing && (!fixStatus?.stage || fixStatus?.stage === 'FIX_GENERATING'), done: isVerified || isSettled || (isFixing && fixStatus?.stage && fixStatus?.stage !== 'FIX_GENERATING') },
-                { step: 2, label: 'AI Patch Synthesis', key: 'SYNTHESIS', active: isFixing && fixStatus?.stage === 'FIX_GENERATING', done: isVerified || (isSettled && Boolean(fixStatus?.summary)) || (isFixing && (fixStatus?.stage === 'CODEX_VERIFYING' || fixStatus?.stage === 'DETERMINISTIC_VERIFYING' || fixStatus?.stage === 'RISK_RECALCULATING')) },
-                { step: 3, label: 'Dual Verification', key: 'VERIFY', active: isFixing && (fixStatus?.stage === 'CODEX_VERIFYING' || fixStatus?.stage === 'DETERMINISTIC_VERIFYING'), done: isVerified || (isFixing && fixStatus?.stage === 'RISK_RECALCULATING'), failed: isNeedsReview || isFailed || isUnresolved },
-                { step: 4, label: 'GitHub PR & Sync', key: 'DEPLOY', active: isFixing && fixStatus?.stage === 'RISK_RECALCULATING', done: isVerified },
-              ].map((st) => (
-                <div
-                  key={st.step}
-                  className={`flex items-center gap-2 p-2 rounded-lg border text-xs font-mono transition-all ${
-                    st.done
-                      ? 'border-accent-emerald/30 bg-accent-emerald-soft/10 text-accent-emerald'
-                      : st.failed
-                        ? 'border-accent-amber/30 bg-accent-amber-soft/10 text-accent-amber'
-                        : st.active
-                          ? 'border-accent-cyan bg-accent-cyan-soft/20 text-accent-cyan shadow-sm'
-                          : 'border-border-default/40 bg-bg-subtle/30 text-text-muted opacity-60'
-                  }`}
-                >
-                  <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
-                    st.done
-                      ? 'bg-accent-emerald text-white'
-                      : st.failed
-                        ? 'bg-accent-amber text-black'
-                        : st.active
-                          ? 'bg-accent-cyan text-white pulse-ring-active'
-                          : 'bg-bg-subtle border border-border-default text-text-muted'
-                  }`}>
-                    {st.done ? <Check size={11} strokeWidth={3} /> : st.active ? <Loader2 size={11} className="animate-spin" /> : st.step}
-                  </div>
-                  <span className="truncate text-[11px] font-medium">{st.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Fix Synthesis Card — model attribution is dynamic (fixModelLabel) */}
+          {/* Fix Synthesis Card — model attribution is dynamic (fixModelLabel),
+              never a hardcoded model name, since model_router.py can route
+              different attempts to different providers. */}
           <div className="rounded-xl border border-accent-purple/30 bg-bg-subtle/70 p-3.5 space-y-2 font-mono text-xs">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-default/60 pb-2">
               <div className="flex items-center gap-1.5 text-accent-purple font-semibold">
@@ -595,61 +414,8 @@ export default function FindingCard({
             </div>
 
             <p className="text-text-secondary text-xs leading-relaxed">
-              {fixStatus?.summary || (isFixing ? 'Synthesizing minimal, syntax-accurate patch on isolated branch…' : isFailed ? (fixStatus?.error || 'Fix synthesis or verification failed for this attempt.') : 'No synthesis summary reported by the backend for this attempt.')}
+              {fixStatus?.summary || (isFixing ? 'Synthesizing minimal, syntax-accurate patch on isolated branch…' : 'No synthesis summary reported by the backend for this attempt.')}
             </p>
-          </div>
-
-          {/* Real-time AI Remediation Execution Log Stream */}
-          <div className="rounded-xl border border-white/10 bg-terminal-bg p-3 font-mono text-xs space-y-1.5 animate-fade-rise-in">
-            <div className="flex items-center justify-between text-[11px] text-terminal-muted border-b border-white/10 pb-1.5">
-              <div className="flex items-center gap-1.5 text-accent-cyan font-semibold">
-                <Terminal size={12} />
-                <span>[AI_REMEDIATION_LOG] daemon://fix_{finding.id.toLowerCase()}.log</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setLogsExpanded((v) => !v)}
-                className="text-[10px] text-terminal-muted hover:text-terminal-text flex items-center gap-1 transition-colors"
-              >
-                {logsExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                <span>{logsExpanded ? 'Collapse Logs' : 'View Stream Logs'}</span>
-              </button>
-            </div>
-
-            {logsExpanded && (
-              <div className="space-y-1 pt-1 max-h-40 overflow-y-auto">
-                {remediationLogs.map((log) => (
-                  <div key={log.id} className="flex items-start gap-2 text-terminal-text text-[11px] leading-relaxed">
-                    <span className="text-terminal-muted select-none font-mono">[{log.id}]</span>
-                    <span className="flex-1 flex items-center gap-1.5">
-                      {log.done ? (
-                        <Check size={11} className="text-accent-emerald shrink-0" strokeWidth={2.5} />
-                      ) : log.active ? (
-                        <Loader2 size={11} className="text-accent-cyan animate-spin shrink-0" />
-                      ) : (
-                        <span className="w-2.5 h-2.5 rounded-full border border-white/20 shrink-0 inline-block" />
-                      )}
-                      <span className={log.active ? 'text-accent-cyan font-medium' : log.done ? 'text-slate-200' : 'text-slate-400'}>
-                        {log.text}
-                      </span>
-                    </span>
-                  </div>
-                ))}
-                {isFixing && (
-                  <div className="text-accent-cyan text-[11px] flex items-center gap-1.5 animate-pulse pt-0.5">
-                    <span>&gt;</span> <span>executing in-process synthesis &amp; adversarial verification…</span>
-                  </div>
-                )}
-                {isSettled && (
-                  <div className="text-terminal-muted text-[10px] pt-1 border-t border-white/5 flex items-center justify-between">
-                    <span>Audit trail recorded</span>
-                    <span className={isVerified ? 'text-accent-emerald font-semibold' : 'text-accent-amber'}>
-                      ● {isVerified ? 'PASSED & ACTIVE' : isFailed ? 'FAILED' : 'NEEDS REVIEW'}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
 
           {/* Verification Card — every claim below is derived from the
@@ -773,7 +539,7 @@ export default function FindingCard({
                 </div>
               )}
 
-              {fixStatus?.pullRequest ? (
+              {fixStatus?.pullRequest && (
                 <div className="pt-1 flex items-center justify-between">
                   <span className="text-[11px] text-text-muted">Target branch updated:</span>
                   <a
@@ -784,36 +550,6 @@ export default function FindingCard({
                   >
                     <GitPullRequest size={12} />
                     View PR #{fixStatus.pullRequest.number} on GitHub <ExternalLink size={10} />
-                  </a>
-                </div>
-              ) : (isVerified || isNeedsReview) && scanId && (fixStatus?.fixBranch || finding.suggestedFix) ? (
-                <div className="pt-1 flex items-center justify-between">
-                  <span className="text-[11px] text-text-muted">
-                    {fixStatus?.fixBranch ? `Branch: ${fixStatus.fixBranch}` : (isVerified ? 'Patch verified, PR pending' : 'Patch generated, review pending')}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCreatePr}
-                    disabled={creatingPr}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-accent-cyan hover:underline disabled:opacity-50"
-                  >
-                    {creatingPr ? <Loader2 size={11} className="animate-spin" /> : <GitPullRequest size={11} />}
-                    {creatingPr ? 'Opening…' : 'Create PR on GitHub'}
-                  </button>
-                </div>
-              ) : null}
-
-              {(fixStatus?.jiraTicket || finding.jiraTicket) && (
-                <div className="pt-1 flex items-center justify-between">
-                  <span className="text-[11px] text-text-muted">Jira issue:</span>
-                  <a
-                    href={(fixStatus?.jiraTicket || finding.jiraTicket)!.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-xs font-bold text-[#0052CC] dark:text-[#4c9aff] hover:underline"
-                  >
-                    <ExternalLink size={11} />
-                    Jira {(fixStatus?.jiraTicket || finding.jiraTicket)!.key}
                   </a>
                 </div>
               )}

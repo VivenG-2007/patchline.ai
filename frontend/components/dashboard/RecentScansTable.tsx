@@ -14,7 +14,6 @@ export interface RepoHealthItem {
   status: string;
   scanId?: string;
   fixBranch?: string;
-  jiraTicket?: { key: string; id?: string; url: string } | null;
 }
 
 interface RecentScansTableProps {
@@ -260,22 +259,6 @@ export default function RecentScansTable({ items, pageSize = 5 }: RecentScansTab
                     {/* Actions */}
                     <td className="px-5 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        {r.jiraTicket?.url && (
-                          <a
-                            href={r.jiraTicket.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex items-center gap-1 px-2 py-1 rounded-md font-mono text-[11px] transition-all hover:brightness-110"
-                            style={{
-                              background: 'rgba(0,82,204,0.12)',
-                              border: '1px solid rgba(0,82,204,0.35)',
-                              color: '#4c9aff',
-                            }}
-                            title={`Open Jira Ticket ${r.jiraTicket.key}`}
-                          >
-                            Jira {r.jiraTicket.key}
-                          </a>
-                        )}
                         {r.findings > 0 && (
                           <button
                             className="flex items-center gap-1 px-2 py-1 rounded-md font-mono text-[11px] transition-all"

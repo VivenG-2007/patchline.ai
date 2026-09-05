@@ -125,7 +125,7 @@ export default function NotificationBell() {
             {loading ? (
               <div className="px-4 py-8 text-center text-xs font-mono text-text-muted">Loading telemetry…</div>
             ) : fetchFailed ? (
-              <div className="px-4 py-8 text-center text-xs font-mono text-text-muted">Couldn&apos;t load notifications. Try again shortly.</div>
+              <div className="px-4 py-8 text-center text-xs font-mono text-text-muted">Couldn't load notifications. Try again shortly.</div>
             ) : items.length === 0 ? (
               <div className="px-4 py-8 text-center text-xs font-mono text-text-muted">All systems secure. No alerts.</div>
             ) : (

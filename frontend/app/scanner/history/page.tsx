@@ -13,16 +13,10 @@ import EmptyState from '@/components/ui/EmptyState';
 import ErrorBanner from '@/components/ErrorBanner';
 import VulnerabilityTimeline from '@/components/scanner/VulnerabilityTimeline';
 import { scannerApi } from '@/lib/api';
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+
+// Lazily load recharts components — heavy JS not needed on initial paint
+const { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } =
+  (await import('recharts')) as typeof import('recharts');
 
 type ScanRecord = {
   scanId: string;
@@ -34,22 +28,6 @@ type ScanRecord = {
   blobUri?: string;
   fixBranch?: string;
   fixedAt?: string;
-  jiraTicket?: {
-    key: string;
-    id?: string;
-    url: string;
-  } | null;
-  fixes?: Record<
-    string,
-    {
-      status?: string;
-      jiraTicket?: {
-        key: string;
-        id?: string;
-        url: string;
-      } | null;
-    }
-  >;
   findings?: Array<{
     id: string;
     title: string;
@@ -58,11 +36,6 @@ type ScanRecord = {
     line: number;
     description: string;
     source?: 'deterministic' | 'ai';
-    jiraTicket?: {
-      key: string;
-      id?: string;
-      url: string;
-    } | null;
   }>;
 };
 
@@ -265,18 +238,6 @@ export default function ScanHistoryPage() {
                 </div>
 
                 <div className="flex items-center gap-3 shrink-0">
-                  {record.jiraTicket?.url && (
-                    <a
-                      href={record.jiraTicket.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="px-2.5 py-1.5 bg-[#0052CC]/10 border border-[#0052CC]/30 hover:border-[#0052CC] text-[#0052CC] dark:text-[#4c9aff] font-mono text-xs rounded-lg transition-colors inline-flex items-center gap-1.5 font-medium"
-                      title={`Open Jira Ticket ${record.jiraTicket.key}`}
-                    >
-                      <ExternalLink size={12} /> Jira {record.jiraTicket.key}
-                    </a>
-                  )}
                   {record.blobUri && (
                     <a
                       href={record.blobUri}
@@ -304,46 +265,31 @@ export default function ScanHistoryPage() {
                       <div className="text-xs font-mono uppercase tracking-wider text-text-muted">
                         Discovered Flaws ({record.findings.length})
                       </div>
-                      {record.findings.map((f) => {
-                        const findingJira = record.fixes?.[f.id]?.jiraTicket || f.jiraTicket;
-                        return (
-                          <div key={f.id} className="p-4 rounded-xl border border-border-default bg-bg-card space-y-2">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <Badge tone={SEVERITY_TONE[f.severity] ?? 'neutral'}>{f.severity}</Badge>
-                                <span className="font-semibold text-xs text-text-primary">{f.title}</span>
-                                <span className="font-mono text-xs text-text-muted">{f.id}</span>
-                              </div>
-                              {findingJira?.url && (
-                                <a
-                                  href={findingJira.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="px-2 py-0.5 bg-[#0052CC]/10 border border-[#0052CC]/30 hover:border-[#0052CC] text-[#0052CC] dark:text-[#4c9aff] font-mono text-xs rounded transition-colors inline-flex items-center gap-1 font-medium"
-                                >
-                                  <ExternalLink size={10} /> Jira {findingJira.key}
-                                </a>
-                              )}
-                            </div>
-                            <p className="text-xs text-text-secondary leading-relaxed">{f.description}</p>
-                            <p className="font-mono text-xs text-text-muted">
-                              <span className="text-text-primary">{f.file}</span>
-                              <span className="text-accent-cyan">:{f.line}</span>
-                            </p>
-
-                            {/* Embedded Timeline */}
-                            <div className="pt-2">
-                              <VulnerabilityTimeline
-                                finding={f}
-                                repo={record.repo}
-                                fixBranch={record.fixBranch || `fix/patchline-${f.id.toLowerCase()}`}
-                                detectedAt={record.scannedAt}
-                                fixedAt={record.fixedAt}
-                              />
-                            </div>
+                      {record.findings.map((f) => (
+                        <div key={f.id} className="p-4 rounded-xl border border-border-default bg-bg-card space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge tone={SEVERITY_TONE[f.severity] ?? 'neutral'}>{f.severity}</Badge>
+                            <span className="font-semibold text-xs text-text-primary">{f.title}</span>
+                            <span className="font-mono text-xs text-text-muted">{f.id}</span>
                           </div>
-                        );
-                      })}
+                          <p className="text-xs text-text-secondary leading-relaxed">{f.description}</p>
+                          <p className="font-mono text-xs text-text-muted">
+                            <span className="text-text-primary">{f.file}</span>
+                            <span className="text-accent-cyan">:{f.line}</span>
+                          </p>
+
+                          {/* Embedded Timeline */}
+                          <div className="pt-2">
+                            <VulnerabilityTimeline
+                              finding={f}
+                              repo={record.repo}
+                              fixBranch={record.fixBranch || `fix/patchline-${f.id.toLowerCase()}`}
+                              detectedAt={record.scannedAt}
+                              fixedAt={record.fixedAt}
+                            />
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>

@@ -160,19 +160,11 @@ function GithubPageInner() {
           )}
         </Card>
       ) : (
-        <Button
-            className="gap-2 mb-8"
-            onClick={async () => {
-              try {
-                const res = await githubApi.connect();
-                window.location.href = res.data.url;
-              } catch {
-                // error handled by 401 interceptor
-              }
-            }}
-          >
+        <a href={githubApi.connectUrl()} className="inline-block mb-8">
+          <Button className="gap-2">
             <GithubIcon size={15} /> Connect GitHub account
           </Button>
+        </a>
       )}
 
       {status?.connected && (
