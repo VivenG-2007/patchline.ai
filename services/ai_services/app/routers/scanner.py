@@ -746,17 +746,38 @@ async def _generate_fix(
         except Exception as exc:
             logger.error("ai_fix_provider_call_failed", repo=repo_full, model=model, error=str(exc))
             raise HTTPException(status_code=502, detail=f"AI provider error generating fix: {exc}")
+
+        parsed = None
         try:
             parsed = _parse_json_object(result.get("content") or "")
-            return (
-                parsed["fixedFileContent"],
-                parsed.get("summary", "Applied AI-generated remediation"),
-                result.get("model", model),
-                result.get("provider"),
-            )
-        except Exception as exc:
-            logger.error("ai_fix_json_parse_failed", repo=repo_full, error=str(exc), raw=(result.get("content") or "")[:500])
-            raise HTTPException(status_code=502, detail="AI fix response was not valid JSON")
+        except Exception as parse_err:
+            # If primary provider returned unparseable or truncated JSON, retry with the robust fallback provider
+            if result.get("provider") == "featherless" and provider and model:
+                logger.warning(
+                    "ai_fix_primary_output_unparseable_retrying_fallback",
+                    repo=repo_full, error=str(parse_err), raw=(result.get("content") or "")[:300],
+                )
+                try:
+                    fb_result = await provider.chat(messages, model=model)
+                    parsed = _parse_json_object(fb_result.get("content") or "")
+                    result = {
+                        **fb_result,
+                        "provider": getattr(provider, "PROVIDER_NAME", "fallback"),
+                        "model": model,
+                    }
+                except Exception as fb_exc:
+                    logger.error("ai_fix_fallback_also_failed", repo=repo_full, error=str(fb_exc))
+                    raise HTTPException(status_code=502, detail="AI fix response was not valid JSON from any provider")
+            else:
+                logger.error("ai_fix_json_parse_failed", repo=repo_full, error=str(parse_err), raw=(result.get("content") or "")[:500])
+                raise HTTPException(status_code=502, detail="AI fix response was not valid JSON")
+
+        return (
+            parsed["fixedFileContent"],
+            parsed.get("summary", "Applied AI-generated remediation"),
+            result.get("model", model),
+            result.get("provider"),
+        )
 
     fixed_content, summary, used_model, used_provider = await _call_and_parse(base_prompt)
 
@@ -916,10 +937,12 @@ def _parse_json_object(raw: str) -> dict:
     # Fallback for fix generation responses containing fixedFileContent and summary
     content_match = re.search(r'"fixedFileContent"\s*:\s*"(.*?)"\s*,\s*"summary"', raw, re.DOTALL)
     if not content_match:
-        content_match = re.search(r'"fixedFileContent"\s*:\s*"(.*)"', raw, re.DOTALL)
+        content_match = re.search(r'"fixedFileContent"\s*:\s*"(.*?)"', raw, re.DOTALL)
+    if not content_match:
+        content_match = re.search(r'"fixedFileContent"\s*:\s*"([\s\S]*)', raw)
     summary_match = re.search(r'"summary"\s*:\s*"(.*?)"', raw, re.DOTALL)
     if content_match:
-        extracted = content_match.group(1)
+        extracted = content_match.group(1).rstrip('"} \n\r')
         try:
             cleaned_content = extracted.encode("utf-8").decode("unicode_escape")
         except Exception:
