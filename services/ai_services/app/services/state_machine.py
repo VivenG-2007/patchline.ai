@@ -42,8 +42,8 @@ TRANSITIONS: dict[str, list[str]] = {
     # request that just finished verifying it; see generate_and_verify_fix's
     # Step 5 terminal-state comment.
     "FIX_PROCESSING": ["FIX_PROCESSING", "FIX_VERIFIED", "FIX_NEEDS_REVIEW", "FIX_FAILED", "FIX_UNRESOLVED"],
-    "FIX_NEEDS_REVIEW": ["FIX_QUEUED"],
-    "FIX_FAILED": ["FIX_QUEUED"],
+    "FIX_NEEDS_REVIEW": ["FIX_QUEUED", "FIX_PROCESSING"],
+    "FIX_FAILED": ["FIX_QUEUED", "FIX_PROCESSING"],
     "FIX_VERIFIED": [],
     # Terminal, like FIX_VERIFIED — no outgoing transitions. Reached when a
     # finding has exhausted MAX_FIX_ATTEMPTS bounded remediation attempts
@@ -95,7 +95,7 @@ def assert_transition(scan_doc: Optional[dict], finding_id: str, to_status: str)
             f"Cannot move finding {finding_id} from {from_status} to {to_status}",
             from_status=from_status, to_status=to_status,
         )
-    if to_status == "FIX_QUEUED" and from_status in _RETRY_SOURCES:
+    if to_status in ("FIX_QUEUED", "FIX_PROCESSING") and from_status in _RETRY_SOURCES:
         attempts = attempts_so_far(scan_doc, finding_id)
         if attempts >= MAX_FIX_ATTEMPTS:
             raise InvalidTransitionError(

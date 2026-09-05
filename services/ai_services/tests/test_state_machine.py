@@ -71,11 +71,20 @@ def test_needs_review_and_failed_can_retry_to_queued():
     assert assert_transition(_doc("f1", "FIX_FAILED", 1), "f1", "FIX_QUEUED") == "FIX_FAILED"
 
 
+def test_needs_review_and_failed_can_retry_directly_to_processing():
+    assert assert_transition(_doc("f1", "FIX_NEEDS_REVIEW", 1), "f1", "FIX_PROCESSING") == "FIX_NEEDS_REVIEW"
+    assert assert_transition(_doc("f1", "FIX_FAILED", 1), "f1", "FIX_PROCESSING") == "FIX_FAILED"
+
+
 def test_retry_blocked_once_max_attempts_reached():
     doc = _doc("f1", "FIX_FAILED", MAX_FIX_ATTEMPTS)
     with pytest.raises(InvalidTransitionError) as exc_info:
         assert_transition(doc, "f1", "FIX_QUEUED")
     assert exc_info.value.code == "FIX_ATTEMPTS_EXHAUSTED"
+
+    with pytest.raises(InvalidTransitionError) as exc_info_proc:
+        assert_transition(doc, "f1", "FIX_PROCESSING")
+    assert exc_info_proc.value.code == "FIX_ATTEMPTS_EXHAUSTED"
 
 
 def test_retry_allowed_one_attempt_below_cap():
