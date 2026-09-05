@@ -256,8 +256,8 @@ async function createPr(req, res, next) {
     if (!fixRecord) {
       return res.status(404).json({ error: { message: `Finding '${findingId}' has no fix record`, code: 'FIX_NOT_FOUND', requestId: req.id } });
     }
-    if (fixRecord.status !== 'FIX_VERIFIED') {
-      return res.status(409).json({ error: { message: `Cannot create PR: fix status is '${fixRecord.status}' (expected FIX_VERIFIED)`, code: 'INVALID_FIX_STATUS', requestId: req.id } });
+    if (fixRecord.status !== 'FIX_VERIFIED' && fixRecord.status !== 'FIX_NEEDS_REVIEW') {
+      return res.status(409).json({ error: { message: `Cannot create PR: fix status is '${fixRecord.status}' (expected FIX_VERIFIED or FIX_NEEDS_REVIEW)`, code: 'INVALID_FIX_STATUS', requestId: req.id } });
     }
     if (!fixRecord.fixBranch) {
       return res.status(409).json({ error: { message: 'No fix branch recorded for this finding', code: 'NO_FIX_BRANCH', requestId: req.id } });
@@ -284,11 +284,13 @@ async function createPr(req, res, next) {
       }
     }
 
+    const isVerified = fixRecord.status === 'FIX_VERIFIED';
+    const titlePrefix = isVerified ? '[AI Security Fix]' : '[AI Security Fix - Needs Review]';
     const pr = await githubService.createPullRequest(req.user.id, {
       owner: scanRecord.repoOwner,
       repo: scanRecord.repoName,
-      title: `[AI Security Fix] ${fixRecord.summary || 'Remediate vulnerability'}`,
-      body: `### DevSecOps AI Vulnerability Fix\n\n- **Scan ID**: \`${scanId}\`\n- **Finding**: \`${findingId}\`\n- **Fix Verified**: Yes\n\n${fixRecord.details || ''}`,
+      title: `${titlePrefix} ${fixRecord.summary || 'Remediate vulnerability'}`,
+      body: `### DevSecOps AI Vulnerability Fix\n\n- **Scan ID**: \`${scanId}\`\n- **Finding**: \`${findingId}\`\n- **Status**: ${fixRecord.status}\n- **Fix Verified**: ${isVerified ? 'Yes' : 'Needs Review'}\n\n${fixRecord.details || ''}`,
       head: fixRecord.fixBranch,
       base: scanRecord.branch || 'main',
       githubToken: token,

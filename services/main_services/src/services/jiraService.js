@@ -40,36 +40,143 @@ function apiBase(cloudId) {
   return `https://api.atlassian.com/ex/jira/${cloudId}`;
 }
 
+function textToAdf(text) {
+  if (!text) {
+    return {
+      type: 'doc',
+      version: 1,
+      content: [{ type: 'paragraph', content: [] }],
+    };
+  }
+  const lines = String(text).split('\n');
+  const paragraphs = [];
+  let currentInlineNodes = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim()) {
+      if (currentInlineNodes.length > 0) {
+        paragraphs.push({ type: 'paragraph', content: currentInlineNodes });
+        currentInlineNodes = [];
+      }
+    } else {
+      if (currentInlineNodes.length > 0) {
+        currentInlineNodes.push({ type: 'hardBreak' });
+      }
+      currentInlineNodes.push({ type: 'text', text: line });
+    }
+  }
+  if (currentInlineNodes.length > 0) {
+    paragraphs.push({ type: 'paragraph', content: currentInlineNodes });
+  }
+  if (paragraphs.length === 0) {
+    paragraphs.push({ type: 'paragraph', content: [{ type: 'text', text: String(text).trim() || 'No details provided' }] });
+  }
+
+  return {
+    type: 'doc',
+    version: 1,
+    content: paragraphs,
+  };
+}
+
+async function resolveProjectAndIssueType(connection, requestedIssueType) {
+  let projectKey = env.jira.projectKey;
+  let targetIssueType = requestedIssueType || env.jira.issueType || 'Task';
+
+  // If projectKey is not set, try to find the first accessible project
+  if (!projectKey) {
+    try {
+      const projResp = await fetchWithTimeout(`${apiBase(connection.cloudId)}/rest/api/3/project`, {
+        headers: { accept: 'application/json', authorization: `Bearer ${connection.accessToken}` },
+        timeoutMs: env.timeouts.jira,
+      });
+      if (projResp.ok) {
+        const projects = await projResp.json();
+        if (Array.isArray(projects) && projects.length > 0) {
+          projectKey = projects[0].key;
+          logger.info({ projectKey }, 'Discovered default Jira project key from accessible projects');
+        }
+      }
+    } catch (projErr) {
+      logger.warn({ projErr: projErr.message }, 'Failed to query Jira projects list');
+    }
+  }
+
+  // Next, query project details to verify issue type availability
+  if (projectKey) {
+    try {
+      const detailResp = await fetchWithTimeout(`${apiBase(connection.cloudId)}/rest/api/3/project/${encodeURIComponent(projectKey)}`, {
+        headers: { accept: 'application/json', authorization: `Bearer ${connection.accessToken}` },
+        timeoutMs: env.timeouts.jira,
+      });
+      if (detailResp.ok) {
+        const projectData = await detailResp.json();
+        const availableTypes = (projectData.issueTypes || []).filter((it) => !it.subtask);
+        if (availableTypes.length > 0) {
+          const match = availableTypes.find((it) => it.name.toLowerCase() === targetIssueType.toLowerCase());
+          if (match) {
+            targetIssueType = match.name;
+          } else {
+            const taskFallback = availableTypes.find((it) => it.name.toLowerCase() === 'task') || availableTypes[0];
+            logger.info({ originalType: targetIssueType, fallbackType: taskFallback.name, projectKey }, 'Jira project does not have requested issue type, falling back');
+            targetIssueType = taskFallback.name;
+          }
+        }
+      }
+    } catch (metaErr) {
+      logger.warn({ metaErr: metaErr.message, projectKey }, 'Failed to query Jira project issue types');
+    }
+  }
+
+  return { projectKey: projectKey || 'HACK', issueType: targetIssueType };
+}
+
 async function createIssue({ userId, summary, description, issueType }) {
   const connection = await getValidConnection(userId);
+  const resolved = await resolveProjectAndIssueType(connection, issueType);
 
-  const response = await fetchWithTimeout(`${apiBase(connection.cloudId)}/rest/api/3/issue`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json',
-      authorization: `Bearer ${connection.accessToken}`,
-    },
-    body: JSON.stringify({
-      fields: {
-        project: { key: env.jira.projectKey },
-        summary,
-        issuetype: { name: issueType || env.jira.issueType },
-        description: {
-          type: 'doc',
-          version: 1,
-          content: [{ type: 'paragraph', content: [{ type: 'text', text: description }] }],
-        },
+  const postIssue = async (projKey, typeName) => {
+    return fetchWithTimeout(`${apiBase(connection.cloudId)}/rest/api/3/issue`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+        authorization: `Bearer ${connection.accessToken}`,
       },
-    }),
-    timeoutMs: env.timeouts.jira,
-  });
+      body: JSON.stringify({
+        fields: {
+          project: { key: projKey },
+          summary,
+          issuetype: { name: typeName },
+          description: textToAdf(description),
+        },
+      }),
+      timeoutMs: env.timeouts.jira,
+    });
+  };
 
-  const data = await response.json().catch(() => ({}));
+  let response = await postIssue(resolved.projectKey, resolved.issueType);
+  let data = await response.json().catch(() => ({}));
+
+  // If issuetype was rejected with 400, retry with 'Task' or standard issue type
+  if (!response.ok && response.status === 400 && JSON.stringify(data).toLowerCase().includes('issuetype')) {
+    if (resolved.issueType !== 'Task') {
+      logger.info({ projectKey: resolved.projectKey }, 'Retrying Jira issue creation with issuetype: Task');
+      response = await postIssue(resolved.projectKey, 'Task');
+      data = await response.json().catch(() => ({}));
+    }
+  }
+
   if (!response.ok) {
-    logger.error({ status: response.status, data }, 'Jira issue creation failed');
-    const err = new Error(data?.errorMessages?.[0] || 'Jira API rejected the request');
+    const errorDetails =
+      data?.errorMessages?.join('; ') ||
+      (data?.errors ? Object.entries(data.errors).map(([k, v]) => `${k}: ${v}`).join('; ') : '') ||
+      response.statusText;
+    logger.error({ status: response.status, data, errorDetails }, 'Jira issue creation failed');
+    const err = new Error(`Jira issue creation failed (${response.status}): ${errorDetails}`);
     err.status = 502;
+    err.details = data;
     throw err;
   }
 

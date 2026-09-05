@@ -70,10 +70,14 @@ async function processScanJob(job) {
           userId,
           summary: `[DevSecOps AI] Security Vulnerabilities in ${repoOwner}/${repoName}`,
           description:
-            `AI Vulnerability Scan completed.\nFound ${scanResults.findings.length} issue(s).\n` +
-            `Scan ID: ${scanId}\nBlob URI: ${scanResults.blobUri || 'N/A'}` +
-            (scanResults.aiAnalysisNote ? `\n\n${scanResults.aiAnalysisNote}` : ''),
-          issueType: 'Bug',
+            `AI Vulnerability Scan completed.\n\n` +
+            `Found ${scanResults.findings.length} issue(s).\n` +
+            `Scan ID: ${scanId}\n` +
+            `Repository: ${repoOwner}/${repoName}\n` +
+            `Blob URI: ${scanResults.blobUri || 'N/A'}\n` +
+            `Azure Artifact Container: https://patchline.blob.core.windows.net/scan\n` +
+            (scanResults.aiAnalysisNote ? `\nAnalysis Note: ${scanResults.aiAnalysisNote}` : ''),
+          issueType: env.jira.issueType || 'Task',
         });
         if (jiraTicket) {
           try {
@@ -84,12 +88,12 @@ async function processScanJob(job) {
               timeoutMs: env.timeouts.aiStorage,
             });
           } catch (syncErr) {
-            logger.warn({ syncErr, scanId }, 'Failed to sync Jira ticket to ai-storage service');
+            logger.warn({ syncErr: syncErr.message, scanId }, 'Failed to sync Jira ticket to ai-storage service');
           }
         }
       }
     } catch (jiraErr) {
-      logger.warn({ jiraErr, scanId }, 'Failed to create Jira ticket automatically');
+      logger.warn({ jiraErr: jiraErr.message, scanId, userId }, 'Failed to create Jira ticket automatically');
     }
 
     await scanStore.transitionScan(scanId, 'COMPLETED_WAITING_APPROVAL', {
@@ -229,10 +233,13 @@ async function processFixJob(job) {
             userId,
             summary: `[DevSecOps AI] Manual review required — no valid fix found for ${findingId}`,
             description:
-              `PatchLine exhausted its bounded remediation attempts for this finding without producing a ` +
-              `verified fix.\n\nScan ID: ${scanId}\nFinding: ${findingId}\nRepo: ${repoOwner}/${repoName}\n\n` +
+              `PatchLine exhausted its bounded remediation attempts for this finding without producing a verified fix.\n\n` +
+              `Scan ID: ${scanId}\n` +
+              `Finding: ${findingId}\n` +
+              `Repo: ${repoOwner}/${repoName}\n` +
+              `Azure Artifact Container: https://patchline.blob.core.windows.net/scan\n\n` +
               `${fixResult.details || fixResult.summary || ''}`,
-            issueType: 'Bug',
+            issueType: env.jira.issueType || 'Task',
           });
           if (jiraTicket) {
             await scanStore.updateFix(scanId, findingId, { jiraTicket });
@@ -244,11 +251,11 @@ async function processFixJob(job) {
                 timeoutMs: env.timeouts.aiStorage,
               });
             } catch (syncErr) {
-              logger.warn({ syncErr, scanId, findingId }, 'Failed to sync finding Jira ticket to ai-storage service');
+              logger.warn({ syncErr: syncErr.message, scanId, findingId }, 'Failed to sync finding Jira ticket to ai-storage service');
             }
           }
         } catch (jiraErr) {
-          logger.warn({ jiraErr, scanId, findingId }, 'Failed to create Jira ticket for unresolved finding');
+          logger.warn({ jiraErr: jiraErr.message, scanId, findingId, userId }, 'Failed to create Jira ticket for unresolved finding');
         }
         logger.warn({ scanId, findingId, jobId: job.id }, 'fix job completed — UNRESOLVED, manual intervention required');
       } else {
@@ -269,7 +276,7 @@ async function processFixJob(job) {
         title: `[AI Security Fix] ${fixResult.summary || 'Remediate vulnerability'}`,
         body: `### DevSecOps AI Vulnerability Fix\n\n- **Scan ID**: \`${scanId}\`\n- **Finding**: \`${findingId}\`\n- **Fix Verified**: Yes\n\n${fixResult.details || ''}`,
         head: fixResult.fixBranch,
-        base: branch,
+        base: branch || 'main',
         githubToken: effectiveToken,
       });
       logger.info({ prNumber: pr?.number, prUrl: pr?.url, scanId, findingId }, 'GitHub pull request successfully opened for verified fix');

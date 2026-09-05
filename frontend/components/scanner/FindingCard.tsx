@@ -412,17 +412,41 @@ export default function FindingCard({
                 <AlertTriangle size={14} />
                 Needs Human Review
               </div>
-              {!maxAttemptsReached && (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={handleApprove}
-                  disabled={isFixing}
-                  className="text-xs"
-                >
-                  Retry ({3 - attempts} left)
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                {fixStatus?.pullRequest ? (
+                  <a
+                    href={fixStatus.pullRequest.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-mono text-accent-cyan hover:underline font-bold"
+                  >
+                    <GitPullRequest size={13} />
+                    PR #{fixStatus.pullRequest.number} <ExternalLink size={11} />
+                  </a>
+                ) : fixStatus?.fixBranch ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={handleCreatePr}
+                    disabled={creatingPr}
+                    className="text-xs inline-flex items-center gap-1.5 h-7 px-2.5"
+                  >
+                    {creatingPr ? <Loader2 size={12} className="animate-spin" /> : <GitPullRequest size={12} />}
+                    {creatingPr ? 'Opening PR…' : 'Create PR'}
+                  </Button>
+                ) : null}
+                {!maxAttemptsReached && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={handleApprove}
+                    disabled={isFixing}
+                    className="text-xs h-7 px-2.5"
+                  >
+                    Retry ({3 - attempts} left)
+                  </Button>
+                )}
+              </div>
             </div>
           ) : isUnresolved ? (
             <div className="flex flex-col sm:items-end gap-1.5">
@@ -762,10 +786,10 @@ export default function FindingCard({
                     View PR #{fixStatus.pullRequest.number} on GitHub <ExternalLink size={10} />
                   </a>
                 </div>
-              ) : isVerified && scanId && (fixStatus?.fixBranch || finding.suggestedFix) ? (
+              ) : (isVerified || isNeedsReview) && scanId && (fixStatus?.fixBranch || finding.suggestedFix) ? (
                 <div className="pt-1 flex items-center justify-between">
                   <span className="text-[11px] text-text-muted">
-                    {fixStatus?.fixBranch ? `Branch: ${fixStatus.fixBranch}` : 'Patch verified, PR pending'}
+                    {fixStatus?.fixBranch ? `Branch: ${fixStatus.fixBranch}` : (isVerified ? 'Patch verified, PR pending' : 'Patch generated, review pending')}
                   </span>
                   <button
                     type="button"

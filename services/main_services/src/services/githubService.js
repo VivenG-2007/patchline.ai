@@ -159,12 +159,22 @@ async function getRepoToken(owner, repo, userId) {
 
 async function createPullRequest(userId, { owner, repo, title, body, head, base = 'main', githubToken, accessToken }) {
   let token = accessToken || githubToken;
-  if (!token) {
+  if (!token && userId) {
     token = await getRepoToken(owner, repo, userId);
   }
+  if (!token && userId) {
+    try {
+      const connection = await getConnection(userId);
+      token = connection?.accessToken;
+    } catch (connErr) {
+      logger.warn({ connErr: connErr.message, userId }, 'Could not get connection for createPullRequest');
+    }
+  }
+
   if (!token) {
-    const connection = await getConnection(userId);
-    token = connection.accessToken;
+    const err = new Error('No GitHub token available to create pull request — connect GitHub or provide a repository token');
+    err.status = 401;
+    throw err;
   }
 
   const authHeader = token.startsWith('Bearer ') || token.startsWith('token ') ? token : (token.startsWith('ghp_') ? `token ${token}` : `Bearer ${token}`);
@@ -183,14 +193,25 @@ async function createPullRequest(userId, { owner, repo, title, body, head, base 
     });
   };
 
+  const hasNoCommits = (d) => {
+    const full = String(d?.message || '') + ' ' + (d?.errors ? JSON.stringify(d.errors) : '');
+    return full.toLowerCase().includes('no commits between');
+  };
+
+  const hasAlreadyExists = (d) => {
+    const full = String(d?.message || '') + ' ' + (d?.errors ? JSON.stringify(d.errors) : '');
+    return full.toLowerCase().includes('already exists');
+  };
+
   let targetBase = base || 'main';
   let response = await postPR(targetBase, head);
   let data = await response.json().catch(() => ({}));
 
-  // If GitHub says no commits between base and head, wait 1.5s for git ref replication and retry once
-  if (!response.ok && response.status === 422 && String(data?.message || '').toLowerCase().includes('no commits between')) {
-    logger.info({ owner, repo, head }, 'Waiting 1.5s for GitHub git ref replication before retrying PR creation');
-    await new Promise((r) => setTimeout(r, 1500));
+  // If GitHub says no commits between base and head, wait for git ref replication and retry up to 2 times
+  for (let attempt = 0; attempt < 2 && !response.ok && response.status === 422 && hasNoCommits(data); attempt++) {
+    const waitTime = (attempt + 1) * 1500;
+    logger.info({ owner, repo, head, attempt: attempt + 1, waitTime }, 'Waiting for GitHub git ref replication before retrying PR creation');
+    await new Promise((r) => setTimeout(r, waitTime));
     response = await postPR(targetBase, head);
     data = await response.json().catch(() => ({}));
   }
@@ -213,7 +234,7 @@ async function createPullRequest(userId, { owner, repo, title, body, head, base 
         }
       }
     } catch (retryErr) {
-      logger.warn({ retryErr }, 'Failed retrying PR creation with default branch');
+      logger.warn({ retryErr: retryErr.message }, 'Failed retrying PR creation with default branch');
     }
   }
 
@@ -224,7 +245,7 @@ async function createPullRequest(userId, { owner, repo, title, body, head, base 
   }
 
   // If a pull request already exists for this head branch, retrieve and return it
-  if (!response.ok && response.status === 422 && String(data?.message || '').toLowerCase().includes('already exists')) {
+  if (!response.ok && response.status === 422 && hasAlreadyExists(data)) {
     try {
       const listResp = await fetchWithTimeout(`${githubConfig.API_BASE}/repos/${owner}/${repo}/pulls?head=${owner}:${head}&state=all`, {
         headers: { authorization: authHeader, accept: 'application/vnd.github+json', 'user-agent': 'patchline' },
@@ -238,12 +259,13 @@ async function createPullRequest(userId, { owner, repo, title, body, head, base 
         }
       }
     } catch (findErr) {
-      logger.warn({ findErr }, 'Failed retrieving existing PR after 422');
+      logger.warn({ findErr: findErr.message }, 'Failed retrieving existing PR after 422');
     }
   }
 
   if (!response.ok) {
-    const err = new Error(data?.message || 'GitHub rejected the Pull Request creation request');
+    const errorDetails = data?.errors ? JSON.stringify(data.errors) : (data?.message || response.statusText);
+    const err = new Error(`GitHub rejected the Pull Request creation request: ${errorDetails}`);
     err.status = response.status === 404 ? 404 : 502;
     err.details = data;
     throw err;
